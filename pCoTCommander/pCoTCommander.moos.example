@@ -1,0 +1,69 @@
+//------------------------------------------
+// pCoTCommander config block
+//
+// pCoTCommander subscribes to COT_INBOUND (raw CoT XML
+// published by pCoTBridge) and translates operator commands
+// from ATAK into MOOS variable publications for pHelmIvP.
+//
+// REQUIRES pCoTBridge to be running — pCoTCommander has no
+// TAK server connection of its own. It only reads COT_INBOUND.
+//
+// ANTLER block entry:
+//   Run = pCoTCommander @ NewConsole = false
+//------------------------------------------
+
+ProcessConfig = pCoTCommander
+{
+  AppTick   = 4     // Iterate() fires only on new mail (COMMS_DRIVEN mode)
+  CommsTick = 10    // keep high so COT_INBOUND is picked up quickly
+
+  // ---- Waypoint control ----
+  // "Go To" command (b-m-p-w-GOTO) sent from ATAK:
+  //   1. Posts ATAK_ACTIVE = true
+  //   2. Posts ATAK_WPT_UPDATE = "points=x,y # capture_radius=r"
+  //
+  // Requires waypt_atak behavior in .bhv file:
+  //   Behavior = BHV_Waypoint
+  //   {
+  //     name      = waypt_atak
+  //     pwt       = 150
+  //     condition = DEPLOY = true
+  //     condition = ATAK_ACTIVE = true
+  //     perpetual = true
+  //     updates   = ATAK_WPT_UPDATE
+  //     ...
+  //   }
+  enable_waypoint_control = true
+
+  // MOOS variable name for the waypoint update string.
+  // Must match 'updates = ATAK_WPT_UPDATE' in the .bhv block.
+  waypoint_update_var = ATAK_WPT_UPDATE
+
+  // How close (meters) the robot must get before the waypoint
+  // is considered captured by BHV_Waypoint. Tune based on the
+  // robot's turning radius and typical approach speed.
+  // At 3 m/s a Surveyor needs ~15-20m to turn around cleanly.
+  capture_radius = 15.0
+
+  // ---- Security ----
+  // Optional: restrict commands to one specific ATAK device.
+  // Find your device UID in ATAK: Settings → About.
+  // Leave commented to accept commands from any connected device.
+  // operator_uid_filter = ANDROID-abc123def456
+
+  // ---- Geodesy ----
+  // Converts incoming ATAK lat/lon to MOOS-IvP local XY.
+  // Uses lib_cot_geodesy (same as pCoTBridge).
+  //   false (default): MOOSGeodesy UTM projection if available,
+  //                    falls back to NAV flat-earth automatically
+  //   true:            always use NAV flat-earth anchor
+  use_nav_fallback = false
+
+  // ---- Debug output ----
+  // false (default): AppCast shows counters and last command only.
+  // true:            verbose — every COT_INBOUND logged with type,
+  //                  uid, lat/lon, and dispatch decision.
+  //                  Useful for discovering new ATAK command types
+  //                  (unhandled types appear in ignored count).
+  debug = false
+}

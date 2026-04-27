@@ -1,0 +1,51 @@
+//------------------------------------------
+// pCoTChat config block
+//
+// Bridges ATAK GeoChat messages to/from MOOS variables.
+// Requires pCoTBridge to be running.
+//
+// ANTLER block entry:
+//   Run = pCoTChat @ NewConsole = false
+//------------------------------------------
+
+ProcessConfig = pCoTChat
+{
+  AppTick   = 4     // event-driven via COMMS_DRIVEN_ITERATE_AND_MAIL
+  CommsTick = 10
+
+  // Own vehicle identity — must match pCoTBridge own_vehicle
+  own_callsign = alpha
+  // own_uid = surveyor-alpha  // default: surveyor-{own_callsign}
+
+  // Echo filter — suppress own messages echoed back by TAK server
+  echo_filter = true
+
+  // ---- Debug output ----
+  // true: every inbound/outbound message logged with full detail
+  debug = false
+}
+
+//------------------------------------------
+// Outbound usage — post ATAK_CHAT_OUT to MOOSDB:
+//
+//   All Chat Rooms broadcast:
+//     ATAK_CHAT_OUT = message=hello team|chatroom=All Chat Rooms
+//
+//   Team color broadcast:
+//     ATAK_CHAT_OUT = message=blue team ready|chatroom=Cyan
+//
+//   Role broadcast:
+//     ATAK_CHAT_OUT = message=report in|chatroom=HQ
+//
+//   All groups broadcast:
+//     ATAK_CHAT_OUT = message=hello groups|chatroom=Groups
+//
+//   All teams broadcast:
+//     ATAK_CHAT_OUT = message=hello teams|chatroom=Teams
+//
+//   Named group message (members resolved from contact table):
+//     ATAK_CHAT_OUT = message=briefing at 0800|chatroom=Test Group
+//
+//   Direct message to callsign (UID resolved from contact table):
+//     ATAK_CHAT_OUT = message=good morning|chatroom=Tyler
+//------------------------------------------

@@ -1,0 +1,57 @@
+//------------------------------------------
+// pCoTGraphics config block
+//
+// Converts MOOS VIEW_* graphics variables to CoT XML and
+// publishes to COT_OUTBOUND for pCoTBridge to forward to TAK.
+//
+// REQUIRES pCoTBridge to be running — pCoTGraphics publishes
+// to COT_OUTBOUND which pCoTBridge reads and forwards.
+//
+// ANTLER block entry:
+//   Run = pCoTGraphics @ NewConsole = false
+//------------------------------------------
+
+ProcessConfig = pCoTGraphics
+{
+  AppTick   = 10
+  CommsTick = 10
+
+  // ---- VIEW_POINT → CoT spot marker (b-m-p-s-m) ----
+  // Converts VIEW_POINT published by pMarineViewer/pHelmIvP
+  // to CoT spot markers visible on the ATAK map.
+  // active=false sends a delete CoT (t-x-d-d) to remove the icon.
+  publish_view_points = true
+
+  // Send VIEW_POINTs immediately on every OnNewMail update.
+  // Required for the vehicle trackpt marker to stay in sync
+  // with pMarineViewer. Set false to throttle at
+  // stationary_send_interval instead.
+  immediate_view_points = true
+
+  // ---- VIEW_SEGLIST → CoT polyline (u-d-f) ----
+  // Converts VIEW_SEGLIST (waypoint paths, survey polygons, etc.)
+  // to CoT polylines visible on the ATAK map.
+  // active=false sends a delete CoT to remove the line.
+  publish_view_seglists = true
+
+  // ---- Send throttle ----
+  // Seconds between re-sends for throttled graphics.
+  // Applies to VIEW_SEGLISTs and throttled VIEW_POINTs.
+  // CoT icons persist on ATAK until stale (24h default) so
+  // re-sending every few seconds is sufficient to keep them alive.
+  stationary_send_interval = 3.0
+
+  // ---- Geodesy ----
+  // Converts MOOS local XY to WGS84 lat/lon for CoT.
+  // Uses lib_cot_geodesy — reads LatOrigin/LongOrigin from .moos.
+  //   false (default): MOOSGeodesy UTM projection if available,
+  //                    falls back to NAV flat-earth automatically
+  //   true:            always use NAV flat-earth anchor
+  use_nav_fallback = false
+
+  // ---- Debug output ----
+  // false (default): AppCast shows counts and tracked label lists.
+  // true:            verbose — every VIEW_* parse logged with
+  //                  label, coordinates, and CoT type sent.
+  debug = false
+}

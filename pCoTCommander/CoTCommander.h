@@ -1,0 +1,160 @@
+/************************************************************/
+/*    NAME: Tyler Errico                                    */
+/*    ORGN: West Point Robotics Research Center, USMA       */
+/*    FILE: CoTCommander.h                                  */
+/*    DATE: April 2026                                      */
+/*                                                          */
+/*  pCoTCommander — inbound CoT command dispatcher.         */
+/*                                                          */
+/*  Subscribes to COT_INBOUND (raw CoT XML published by     */
+/*  pCoTBridge) and translates operator commands from ATAK  */
+/*  into MOOS variable publications for pHelmIvP behaviors. */
+/*                                                          */
+/*  Architecture:                                           */
+/*    TAK Server                                            */
+/*      ↓ (TCP)                                             */
+/*    pCoTBridge → COT_INBOUND                              */
+/*                      ↓                                   */
+/*               pCoTCommander                              */
+/*                      ↓                                   */
+/*    ATAK_ACTIVE=true + ATAK_WPT_UPDATE → pHelmIvP        */
+/*                                                          */
+/*  Handled CoT types:                                      */
+/*    b-m-p-w-GOTO → waypoint command                       */
+/*      Publishes: ATAK_ACTIVE = true                       */
+/*                 ATAK_WPT_UPDATE = points=x,y #           */
+/*                                   capture_radius=r       */
+/*      Requires waypt_atak behavior in .bhv with:          */
+/*        condition = ATAK_ACTIVE = true                    */
+/*        updates   = ATAK_WPT_UPDATE                       */
+/*                                                          */
+/*  Adding new command types:                               */
+/*    1. Add a handler method (e.g. handleChatCoT)          */
+/*    2. Add a case in dispatchInboundCoT()                 */
+/*    3. No changes needed in pCoTBridge                    */
+/*                                                          */
+/*  MOOS Interface:                                         */
+/*    Subscribes: COT_INBOUND    (from pCoTBridge)          */
+/*                NODE_REPORT    (for NAV anchor — geodesy) */
+/*                NODE_REPORT_LOCAL                         */
+/*    Publishes:  ATAK_ACTIVE    (bool string)              */
+/*                ATAK_WPT_UPDATE (BHV_Waypoint update str) */
+/************************************************************/
+
+#ifndef COT_COMMANDER_HEADER
+#define COT_COMMANDER_HEADER
+
+#include <string>
+#include <deque>
+#include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
+#include "CoTGeodesy.h"
+
+class CoTCommander : public AppCastingMOOSApp
+{
+public:
+  CoTCommander();
+  virtual ~CoTCommander() {}
+
+  bool OnNewMail(MOOSMSG_LIST &NewMail);
+  bool Iterate();
+  bool OnConnectToServer();
+  bool OnStartUp();
+  bool buildReport();
+
+protected:
+  void registerVariables();
+  void debugLog(const std::string& msg);
+
+  // --------------------------------------------------------
+  // CoT parsing utilities
+  //
+  // extractAttr() is a lightweight attribute extractor for
+  // CoT XML. CoT is simple enough that a full XML parser
+  // is not needed — attribute scanning is sufficient and
+  // avoids a libxml2 dependency.
+  // --------------------------------------------------------
+
+  // Extract a named attribute value from a CoT XML string.
+  // Handles both single and double quoted attribute values.
+  // Example:
+  //   extractAttr("<event uid=\"foo\" type=\"bar\">", "uid") → "foo"
+  std::string extractAttr(const std::string& xml,
+                           const std::string& attr);
+
+  // Dispatch a received CoT event to the appropriate handler.
+  // Returns true if the event was handled (known type).
+  bool dispatchInboundCoT(const std::string& xml);
+
+  // --------------------------------------------------------
+  // Command handlers
+  //
+  // Each handler corresponds to one CoT type or family.
+  // Add new handlers here as new command types are needed.
+  // --------------------------------------------------------
+
+  // b-m-p-w-GOTO — "Go To" waypoint from ATAK.
+  // Converts lat/lon to local XY via CoTGeodesy and publishes
+  // ATAK_ACTIVE=true + ATAK_WPT_UPDATE to pHelmIvP.
+  void handleWaypointCoT(const std::string& uid,
+                          double lat, double lon,
+                          const std::string& xml);
+
+private:
+  // --------------------------------------------------------
+  // Geodesy — LatLon → local XY for waypoint conversion
+  // --------------------------------------------------------
+  CoTGeodesy  m_geodesy;
+  bool        m_geodesy_initialized;
+
+  // --------------------------------------------------------
+  // Config
+  // --------------------------------------------------------
+
+  // MOOS variable published when ATAK sends a waypoint.
+  // Must match 'updates = ATAK_WPT_UPDATE' in waypt_atak .bhv
+  std::string m_waypoint_update_var;  // default: ATAK_WPT_UPDATE
+
+  // How close (meters) robot must get before waypoint is captured.
+  // Sent in the WPT_UPDATE string as "capture_radius=r".
+  double m_capture_radius;            // default: 15.0m
+
+  // Optional: only accept commands from this ATAK device UID.
+  // Leave empty to accept from any connected ATAK client.
+  std::string m_operator_uid_filter;
+
+  // Whether to enable each command type
+  bool m_enable_waypoint_control;
+
+  bool m_debug;
+
+  // --------------------------------------------------------
+  // Debug message circular buffer
+  // --------------------------------------------------------
+  static const int DEBUG_BUF_SIZE = 8;
+  std::deque<std::string> m_debug_msgs;
+
+  // --------------------------------------------------------
+  // Diagnostics
+  // --------------------------------------------------------
+  unsigned int m_cot_received;
+  unsigned int m_cot_handled;
+  unsigned int m_cot_ignored;
+  unsigned int m_waypoint_commands;
+  std::string  m_last_command;        // description of last command for AppCast
+
+  // Last waypoint sender — used for acknowledgment DM back to operator
+  std::string m_last_sender_callsign;
+  double      m_last_wpt_lat;
+  double      m_last_wpt_lon;
+
+  // Deployment state — tracked from DEPLOY MOOS variable.
+  // Waypoints are rejected if the robot is not deployed.
+  bool        m_deployed;
+
+  // Guards against repeated "Waypoint reached" messages.
+  // Set true after the first reached notification for a given
+  // waypoint. Reset to false when a new waypoint arrives.
+  bool        m_wpt_reached_sent;
+};
+
+#endif // COT_COMMANDER_HEADER
