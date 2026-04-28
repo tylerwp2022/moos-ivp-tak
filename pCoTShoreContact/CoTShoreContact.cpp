@@ -297,12 +297,29 @@ string CoTShoreContact::buildContactCoT()
   string cot_type  = "a-" + affil + "-G-E";
   string icon_path = "COT_MAPPING_2525C/a-" + affil + "/a-" + affil + "-G";
 
+  // SA contact detail block — matches real ATAK contact format.
+  // Key elements that place this in the contacts list (not just on map):
+  //   endpoint="*:-1:stcp" — marks as a reachable SA endpoint
+  //   <uid Droid="..."/>   — callsign binding for the contacts list
+  //   <__group>            — team/role assignment (shows in contact card)
+  //   <takv>               — platform identification
+  //   <track>              — speed/course (0 for static shore station)
+  //
+  // Intentionally omitted (these cause map-marker behavior, not contact):
+  //   <archive/>           — makes ATAK treat it as a persistent drawing
+  //   <usericon>           — custom icon path used for drawings/markers
   string detail =
     "<detail>"
-      "<contact callsign=\"" + m_callsign + "\"/>"
-      "<archive/>"
-      "<usericon iconsetpath=\"" + icon_path + "\"/>"
-      "<precisionlocation altsrc=\"MANUAL\" geopointsrc=\"???\"/>"
+      "<contact callsign=\"" + m_callsign + "\" endpoint=\"*:-1:stcp\"/>"
+      "<uid Droid=\"" + m_callsign + "\"/>"
+      "<__group name=\"Cyan\" role=\"HQ\"/>"
+      "<takv"
+        " device=\"Shoreside\""
+        " platform=\"pCoTShoreContact\""
+        " os=\"Linux\""
+        " version=\"1.0.0\"/>"
+      "<status battery=\"100\"/>"
+      "<track course=\"0.0\" speed=\"0.0\"/>"
     "</detail>";
 
   return
