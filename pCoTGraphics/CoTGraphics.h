@@ -7,27 +7,34 @@
 /*  pCoTGraphics — VIEW_* to CoT graphics renderer.         */
 /*                                                          */
 /*  Subscribes to MOOS VIEW_* variables published by        */
-/*  pMarineViewer and pHelmIvP, converts them to CoT XML,  */
-/*  and publishes to COT_OUTBOUND for pCoTBridge to forward */
-/*  to the TAK server.                                      */
+/*  pHelmIvP, uFldFlagManager, and uFldTagManager on the   */
+/*  shore MOOSDB, converts them to CoT XML, and publishes   */
+/*  to COT_OUTBOUND for pCoTBridge to forward to TAK.       */
 /*                                                          */
-/*  Supported VIEW_* types:                                 */
-/*    VIEW_POINT   → CoT spot marker (b-m-p-s-m)           */
-/*    VIEW_SEGLIST → CoT polyline   (u-d-f)                 */
+/*  Supported conversions:                                  */
+/*    VIEW_POINT       → spot marker     (b-m-p-s-m)        */
+/*    VIEW_SEGLIST     → open polyline   (u-d-f)            */
+/*    VIEW_POLYGON     → filled polygon  (u-d-f + fillColor) */
+/*    UTM_ZONE_ONE/TWO → filled polygon  (team zone bounds) */
+/*    VIEW_MARKER      → colored flag marker (b-m-p-s-m)   */
+/*    FLAG_SUMMARY     → colored flag markers (b-m-p-s-m)  */
+/*    VIEW_TEXTBOX     → text label on map (b-m-p-s-m/LABEL)*/
+/*    active=false     → delete event    (t-x-d-d)          */
 /*                                                          */
-/*  active=false handling:                                  */
-/*    Both types support active=false deactivation.         */
-/*    When received, a CoT delete (t-x-d-d) is sent to     */
-/*    remove the icon from the ATAK map immediately.        */
+/*  CoT 'how' attribute values (matched from live captures):*/
 /*                                                          */
-/*  Send rate:                                              */
-/*    VIEW_POINTs: configurable — immediate (every update)  */
-/*                 or throttled at stationary_interval      */
-/*    VIEW_SEGLISTs: throttled at stationary_interval       */
+/*  Flag icon color encoding:                               */
+/*    ARGB is embedded in iconsetpath AND in <color> element*/
+/*    e.g. "COT_MAPPING_SPOTMAP/b-m-p-s-m/-65536" for red  */
+/*         "COT_MAPPING_SPOTMAP/b-m-p-s-m/-16776961" blue  */
+/*    Score label uses "COT_MAPPING_SPOTMAP/b-m-p-s-m/LABEL"*/
 /*                                                          */
 /*  MOOS Interface:                                         */
-/*    Subscribes: VIEW_POINT, VIEW_SEGLIST                  */
-/*                NODE_REPORT, NODE_REPORT_LOCAL (geodesy)  */
+/*    Subscribes: VIEW_POINT, VIEW_SEGLIST,                 */
+/*                VIEW_POLYGON, VIEW_MARKER, FLAG_SUMMARY,  */
+/*                UTM_ZONE_ONE, UTM_ZONE_TWO,               */
+/*                VIEW_TEXTBOX,                             */
+/*                NODE_REPORT, NODE_REPORT_LOCAL            */
 /*    Publishes:  COT_OUTBOUND (raw CoT XML strings)        */
 /************************************************************/
 
@@ -43,7 +50,7 @@
 #include "CoTGeodesy.h"
 
 // ============================================================
-// ViewPoint — one VIEW_POINT entry
+// ViewPoint — one VIEW_POINT entry (waypoints, trackpts)
 // ============================================================
 struct ViewPoint {
   std::string label;
@@ -54,13 +61,85 @@ struct ViewPoint {
 };
 
 // ============================================================
-// ViewSegList — one VIEW_SEGLIST entry
+// ViewSegList — one VIEW_SEGLIST entry (open polyline)
 // ============================================================
 struct ViewSegList {
   std::string label;
   std::vector<std::pair<double,double>> vertices; // (lat, lon)
   double last_sent = 0.0;
   bool   valid     = false;
+};
+
+// ============================================================
+// ViewPolygon — one VIEW_POLYGON or UTM_ZONE_* entry
+//
+// Same pts={} vertex format as VIEW_SEGLIST but:
+//   - carries fill_color_argb and edge_color_argb
+//   - rendered as a closed filled polygon in ATAK
+//   - vertex 0 is repeated at the end to close the shape
+//   - uses how="h-e" (confirmed from live ATAK polygon capture)
+//
+// Sources:
+//   VIEW_POLYGON  — uFldFlagManager: flag grab zone circles
+//                   (24-vertex circle approximation, grey fill)
+//   UTM_ZONE_ONE  — uFldTagManager:  red team boundary (pink fill)
+//   UTM_ZONE_TWO  — uFldTagManager:  blue team boundary (light blue)
+// ============================================================
+struct ViewPolygon {
+  std::string label;
+  std::vector<std::pair<double,double>> vertices; // (lat, lon)
+  int    fill_color_argb = -2130706433; // default: semi-transparent white
+  int    edge_color_argb = -1;          // default: opaque white
+  double last_sent       = 0.0;
+  bool   valid           = false;
+};
+
+// ============================================================
+// ViewMarkerGraphic — one VIEW_MARKER or FLAG_SUMMARY entry
+//
+// Rendered as a colored b-m-p-s-m spot marker in ATAK.
+// The ARGB integer is embedded in BOTH the <color> element
+// AND the iconsetpath to correctly tint the icon:
+//   iconsetpath="COT_MAPPING_SPOTMAP/b-m-p-s-m/<argb>"
+//   e.g. "-65536" for red, "-16776961" for blue
+//
+// Sources:
+//   FLAG_SUMMARY — uFldFlagManager: all flags, '#'-delimited
+//   VIEW_MARKER  — uFldFlagManager: single flag state update
+//
+// Format: x=X,y=Y,width=W,range=R,primary_color=red,label=red
+// ============================================================
+struct ViewMarkerGraphic {
+  std::string label;
+  double lat        = 0.0;
+  double lon        = 0.0;
+  int    color_argb = -1;
+  double last_sent  = 0.0;
+  bool   valid      = false;
+};
+
+// ============================================================
+// ViewTextBox — one VIEW_TEXTBOX entry (score display)
+//
+// Rendered as a b-m-p-s-m/LABEL spot marker whose callsign
+// IS the display text. This places a text label at a fixed
+// map position — used to show the live score.
+//
+// In Aquaticus, post_score=$(XE) in uFldFlagManager places
+// the score label at the east midfield position (XE).
+//
+// Format: x=X,y=Y,msg="RED:0 BLUE:0",fsize=20,mcolor=yellow
+//
+// Source: VIEW_TEXTBOX — uFldFlagManager on score change
+// ============================================================
+struct ViewTextBox {
+  std::string label   = "score";  // fixed key in m_view_textboxes map
+  std::string msg;                // the text to display ("RED:0 BLUE:0")
+  double lat        = 0.0;
+  double lon        = 0.0;
+  int    color_argb = -256;       // default yellow: 0xFFFFFF00
+  double last_sent  = 0.0;
+  bool   valid      = false;
 };
 
 
@@ -82,23 +161,47 @@ protected:
 
   // --------------------------------------------------------
   // VIEW_* parsers
-  // Return false if active=false (handles delete) or parse fails.
+  // Return false if active=false (sends delete CoT + cleans up)
+  // or if required fields are missing / geodesy not ready.
   // --------------------------------------------------------
-  bool parseViewPoint(const std::string& raw,   ViewPoint&   vp_out);
-  bool parseViewSegList(const std::string& raw, ViewSegList& vsl_out);
+  bool parseViewPoint(const std::string& raw,         ViewPoint&         vp_out);
+  bool parseViewSegList(const std::string& raw,       ViewSegList&       vsl_out);
+  bool parseViewPolygon(const std::string& raw,       ViewPolygon&       vp_out,
+                        const std::string& map_key);
+  bool parseViewMarkerGraphic(const std::string& raw, ViewMarkerGraphic& vm_out);
+  bool parseFlagSummary(const std::string& raw);
+  bool parseViewTextBox(const std::string& raw,       ViewTextBox&       vtb_out);
 
   // --------------------------------------------------------
   // CoT builders
   // --------------------------------------------------------
   std::string buildViewPointCoT(const ViewPoint& vp);
   std::string buildViewSegListCoT(const ViewSegList& vsl);
+  std::string buildViewPolygonCoT(const ViewPolygon& vp);
+  std::string buildViewMarkerGraphicCoT(const ViewMarkerGraphic& vm);
+  std::string buildViewTextBoxCoT(const ViewTextBox& vtb);
   std::string buildDeleteCoT(const std::string& target_uid,
                               double lat, double lon);
   std::string formatCoTTime(double moos_time,
                              double stale_offset_sec = 0.0);
 
-  // Sanitize a label for use in a CoT UID
-  // (spaces and apostrophes → underscores)
+  // --------------------------------------------------------
+  // Shared pts={x,y:x,y:...} extraction helper.
+  // Used by parseViewSegList and parseViewPolygon — avoids
+  // duplicating the vertex parsing and geodesy conversion.
+  // --------------------------------------------------------
+  bool parsePtsBlock(const std::string& raw,
+                     std::vector<std::pair<double,double>>& vertices_out);
+
+  // --------------------------------------------------------
+  // Color helper — MOOS color name + fill_transparency
+  // → signed ATAK ARGB integer (0xAARRGGBB)
+  // transparency: 0.0 = fully opaque, 1.0 = fully transparent
+  // --------------------------------------------------------
+  int moosColorToArgb(const std::string& color_name,
+                      double transparency = 0.0);
+
+  // Sanitize label for use in CoT UID (spaces/apostrophes → _)
   std::string sanitizeLabel(const std::string& label);
 
 private:
@@ -109,24 +212,29 @@ private:
   bool        m_geodesy_initialized;
 
   // --------------------------------------------------------
-  // Tracked graphics state
-  // Keyed by label — updated in-place on each VIEW_* message
+  // Tracked graphics state — keyed by label
   // --------------------------------------------------------
-  std::map<std::string, ViewPoint>   m_view_points;
-  std::map<std::string, ViewSegList> m_view_seglists;
+  std::map<std::string, ViewPoint>         m_view_points;
+  std::map<std::string, ViewSegList>       m_view_seglists;
+  std::map<std::string, ViewPolygon>       m_view_polygons;
+  std::map<std::string, ViewMarkerGraphic> m_view_marker_graphics;
+  std::map<std::string, ViewTextBox>       m_view_textboxes;
 
   // --------------------------------------------------------
   // Config
   // --------------------------------------------------------
-  bool   m_publish_view_points;      // enable VIEW_POINT → CoT
-  bool   m_publish_view_seglists;    // enable VIEW_SEGLIST → CoT
-  bool   m_immediate_view_points;    // true: send VIEW_POINT on every update
-                                     // false: throttle at stationary_interval
+  bool   m_publish_view_points;
+  bool   m_publish_view_seglists;
+  bool   m_publish_view_polygons;    // VIEW_POLYGON + UTM_ZONE_*
+  bool   m_publish_flag_markers;     // FLAG_SUMMARY + VIEW_MARKER
+  bool   m_publish_score_label;      // VIEW_TEXTBOX score label
+
+  bool   m_immediate_view_points;    // send VIEW_POINT on every update
   double m_stationary_send_interval; // seconds between throttled sends
-  double m_cot_stale_offset;         // seconds — spot markers stale time
+  double m_cot_stale_offset;         // seconds graphics persist in ATAK
 
   bool   m_debug;
-  static const int DEBUG_BUF_SIZE = 8;
+  static const int DEBUG_BUF_SIZE = 12;
   std::deque<std::string> m_debug_msgs;
 
   // --------------------------------------------------------
@@ -134,6 +242,9 @@ private:
   // --------------------------------------------------------
   unsigned int m_vp_cot_sent;
   unsigned int m_vsl_cot_sent;
+  unsigned int m_poly_cot_sent;
+  unsigned int m_flag_cot_sent;
+  unsigned int m_text_cot_sent;
   unsigned int m_delete_cot_sent;
 };
 
