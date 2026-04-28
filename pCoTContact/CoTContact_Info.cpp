@@ -1,7 +1,7 @@
 /************************************************************/
 /*    NAME: Tyler Errico                                    */
 /*    ORGN: West Point Robotics Research Center, USMA       */
-/*    FILE: CoTBridge_Info.cpp                              */
+/*    FILE: CoTContact_Info.cpp                             */
 /*    DATE: April 2026                                      */
 /************************************************************/
 
@@ -9,7 +9,7 @@
 #include <iostream>
 #include "ColorParse.h"
 #include "ReleaseInfo.h"
-#include "CoTBridge_Info.h"
+#include "CoTContact_Info.h"
 
 using namespace std;
 
@@ -17,24 +17,21 @@ void showSynopsis()
 {
   blk("SYNOPSIS:                                                       ");
   blk("------------------------------------                            ");
-  blk("  Pure CoT transport layer for the pCoT* app family.           ");
-  blk("  Maintains a TCP/TLS connection to a TAK server, forwards     ");
-  blk("  COT_OUTBOUND to TAK, and publishes received CoT to           ");
-  blk("  COT_INBOUND. Does not generate or parse CoT content.         ");
+  blk("  Vehicle SA contact CoT publisher for the pCoT* family.       ");
+  blk("  Tracks NODE_REPORT positions and publishes MIL-STD 2525C     ");
+  blk("  surface vessel SA contacts to COT_OUTBOUND. pCoTBridge       ");
+  blk("  forwards them to the TAK server.                              ");
   blk("                                                                ");
-  blk("  Vehicle SA contacts are produced by pCoTContact.             ");
-  blk("  Static position contacts are produced by pCoTShoreContact.   ");
-  blk("  Map graphics are produced by pCoTGraphics.                   ");
-  blk("  GeoChat is handled by pCoTChat.                              ");
-  blk("                                                                ");
-  blk("  Supports plain TCP (port 8088) and mTLS (port 8089).         ");
+  blk("  Single-vehicle mode: one robot, one friendly contact.        ");
+  blk("  Multi-vehicle mode:  full 6-vehicle CTF picture (own +       ");
+  blk("  hostile) from the shoreside MOOSDB.                          ");
 }
 
 void showHelpAndExit()
 {
   blk("                                                                ");
   blu("================================================================");
-  blu("Usage: pCoTBridge file.moos [OPTIONS]                          ");
+  blu("Usage: pCoTContact file.moos [OPTIONS]                         ");
   blu("================================================================");
   blk("                                                                ");
   showSynopsis();
@@ -53,42 +50,35 @@ void showExampleConfigAndExit()
 {
   blk("                                                                ");
   blu("================================================================");
-  blu("pCoTBridge Example MOOS Configuration                          ");
+  blu("pCoTContact Example MOOS Configuration                         ");
   blu("================================================================");
   blk("                                                                ");
-  blk("// ---- Plain TCP (port 8088, no certificates) ----             ");
-  blk("ProcessConfig = pCoTBridge                                      ");
+  blk("// ---- Multi-vehicle mode (shoreside sim) ----                 ");
+  blk("ProcessConfig = pCoTContact                                     ");
   blk("{                                                               ");
   blk("  AppTick   = 4                                                 ");
   blk("  CommsTick = 4                                                 ");
   blk("                                                                ");
-  blu("  tak_host = 192.168.0.38                                       ");
-  blu("  tak_port = 8088   // 8088 = plain TCP, 8089 = mTLS           ");
+  blu("  own_vehicles      = blue_one,blue_two,blue_three              ");
+  blu("  hostile_vehicles  = red_one,red_two,red_three                 ");
   blk("                                                                ");
-  blu("  reconnect_interval = 5.0      // seconds                     ");
-  blu("  cot_delimiter      = newline  // FreeTAKServer: newline       ");
-  blu("                               //  WinTAK Server: null         ");
+  blu("  moving_send_interval     = 1.0   // seconds                  ");
+  blu("  stationary_send_interval = 3.0   // seconds                  ");
+  blu("  speed_threshold          = 0.5   // m/s                      ");
+  blu("  cot_stale_offset         = 10.0  // seconds                  ");
   blk("                                                                ");
   blu("  debug = false                                                 ");
   blk("}                                                               ");
   blk("                                                                ");
-  blk("// ---- mTLS (port 8089, certificates required) ----            ");
-  blk("// ProcessConfig = pCoTBridge                                   ");
+  blk("// ---- Single-vehicle mode (hardware, on the robot) ----       ");
+  blk("// ProcessConfig = pCoTContact                                  ");
   blk("// {                                                            ");
   blk("//   AppTick   = 4                                              ");
   blk("//   CommsTick = 4                                              ");
-  blk("//   tak_host     = 192.168.0.38                                ");
-  blk("//   tak_port     = 8089  // TLS enabled automatically          ");
-  blk("//   tls_cert_file = certs/shoreside.pem                        ");
-  blk("//   tls_key_file  = certs/shoreside.key                        ");
-  blk("//   tls_ca_file   = certs/shoreside-trusted.pem                ");
-  blk("//   tls_key_pass  = atakatak  // omit if key not encrypted     ");
-  blk("//   reconnect_interval = 5.0                                   ");
-  blk("//   cot_delimiter      = newline                               ");
+  blk("//   own_vehicle = blue_one   // auto-learned if omitted        ");
+  blk("//   moving_send_interval     = 1.0                             ");
+  blk("//   stationary_send_interval = 3.0                             ");
   blk("// }                                                            ");
-  blk("                                                                ");
-  blk("// Vehicle SA contacts → see pCoTContact.moos.example           ");
-  blk("// Static contacts     → see pCoTShoreContact --example         ");
   blk("                                                                ");
   exit(0);
 }
@@ -97,29 +87,26 @@ void showInterfaceAndExit()
 {
   blk("                                                                ");
   blu("================================================================");
-  blu("pCoTBridge INTERFACE                                            ");
+  blu("pCoTContact INTERFACE                                           ");
   blu("================================================================");
   blk("                                                                ");
   showSynopsis();
   blk("                                                                ");
   blk("SUBSCRIPTIONS:                                                  ");
   blk("------------------------------------                            ");
-  blk("  COT_OUTBOUND = <event ...>...</event>  (raw CoT XML)         ");
-  blk("    Any app posts CoT XML here; pCoTBridge forwards to TAK.    ");
-  blk("    Publishers: pCoTContact, pCoTShoreContact,                 ");
-  blk("                pCoTGraphics, pCoTChat                         ");
+  blk("  NODE_REPORT       = NAME=...,LAT=...,LON=...,HDG=...,SPD=...");
+  blk("  NODE_REPORT_LOCAL = (same format)                             ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
-  blk("  COT_INBOUND = <event ...>...</event>  (raw CoT XML from TAK) ");
-  blk("    Subscribers: pCoTCommander (GoTo waypoints, commands),     ");
-  blk("                 pCoTChat (inbound GeoChat)                    ");
+  blk("  COT_OUTBOUND = <event type=\"a-f-S-C-U-N\">...</event>       ");
+  blk("                 (or a-h-S-C-U-N for hostile vehicles)         ");
   blk("                                                                ");
   exit(0);
 }
 
 void showReleaseInfoAndExit()
 {
-  showReleaseInfo("pCoTBridge", "gpl");
+  showReleaseInfo("pCoTContact", "gpl");
   exit(0);
 }

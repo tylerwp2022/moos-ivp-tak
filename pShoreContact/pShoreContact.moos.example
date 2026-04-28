@@ -1,0 +1,104 @@
+// ============================================================
+// shore_contact.moos
+//
+// Minimal standalone mission file for testing pCoTShoreContact
+// in isolation. Runs pCoTShoreContact + pCoTBridge so the shore
+// contact appears in ATAK without needing the full Aquaticus
+// mission stack.
+//
+// USAGE:
+//   pAntler shore_contact.moos
+//
+// REQUIREMENTS:
+//   - TAK server reachable at tak_host:tak_port
+//   - moos-ivp-tak built and binaries in PATH or ~/moos-ivp/bin
+//
+// WHAT YOU SHOULD SEE IN ATAK:
+//   A ground equipment icon labeled "AQUATICUS-SHORE" at the
+//   position specified below. Icon color depends on affiliation:
+//     f = blue (friendly)
+//     h = red  (hostile)
+//     n = green (neutral)
+//     u = yellow (unknown)
+// ============================================================
+
+ServerHost = localhost
+ServerPort = 9000
+Community  = shore_contact_test
+
+
+//------------------------------------------------------------
+ProcessConfig = ANTLER
+{
+  MSBetweenLaunches = 200
+
+  Run = MOOSDB             @ NewConsole = false
+  Run = pCoTShoreContact   @ NewConsole = true
+  Run = pCoTBridge         @ NewConsole = true
+}
+
+
+//------------------------------------------------------------
+// pCoTShoreContact
+//
+// Change lat/lon to your actual shore station position.
+// Change affiliation to match your TAK team configuration.
+//------------------------------------------------------------
+ProcessConfig = pCoTShoreContact
+{
+  AppTick   = 1
+  CommsTick = 1
+
+  // Shore station position — update per venue
+  lat = 41.34928      // Lake Popolopen (West Point, NY)
+  lon = -74.063645
+
+  // Optional: height above ellipsoid in meters
+  hae = 0.0
+
+  // Contact identity in ATAK
+  callsign    = AQUATICUS-SHORE
+  affiliation = f    // f=friendly, h=hostile, n=neutral, u=unknown
+
+  // Optional: explicit UID. Auto-generated from callsign if omitted.
+  // uid = aquaticus-shore-001
+
+  // Resend every 30s — shore is static so frequent updates unneeded
+  send_interval = 30.0
+
+  // Contact persists in ATAK for 7 days without refresh
+  stale_seconds = 604800
+
+  debug = true   // show CoT sends in AppCast
+}
+
+
+//------------------------------------------------------------
+// pCoTBridge
+//
+// Forwards COT_OUTBOUND to the TAK server.
+// Change tak_host and tak_port to match your TAK server.
+//   8088 = plain TCP (no certificates required)
+//   8089 = mTLS      (requires certs in pCoTBridge/certs/)
+//------------------------------------------------------------
+ProcessConfig = pCoTBridge
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  tak_host = 192.168.0.38
+  tak_port = 8088
+
+  // For mTLS (tak_port = 8089):
+  // tls_cert_file = certs/shoreside.pem
+  // tls_key_file  = certs/shoreside.key
+  // tls_ca_file   = certs/shoreside-trusted.pem
+  // tls_key_pass  = atakatak
+
+  // In this test file there are no moving vehicles, so
+  // own_vehicle / own_vehicles are not set. pCoTBridge
+  // will still forward COT_OUTBOUND from pCoTShoreContact.
+
+  moving_send_interval     = 1.0
+  stationary_send_interval = 3.0
+}

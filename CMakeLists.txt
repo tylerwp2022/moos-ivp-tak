@@ -77,7 +77,9 @@ SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MOOS_IVP_SRC_ROOT}/bin)
 #============================================================================
 
 ADD_SUBDIRECTORY(lib_cot_geodesy)
+ADD_SUBDIRECTORY(pCoTContact)
 ADD_SUBDIRECTORY(pCoTBridge)
 ADD_SUBDIRECTORY(pCoTCommander)
 ADD_SUBDIRECTORY(pCoTGraphics)
 ADD_SUBDIRECTORY(pCoTChat)
+ADD_SUBDIRECTORY(pCoTShoreContact)

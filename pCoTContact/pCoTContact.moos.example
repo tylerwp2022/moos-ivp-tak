@@ -1,0 +1,155 @@
+// ============================================================
+// pCoTContact.moos.example
+//
+// Annotated example configurations for pCoTContact.
+//
+// pCoTContact tracks vehicle positions from NODE_REPORT and
+// publishes MIL-STD 2525C SA contacts to COT_OUTBOUND.
+// pCoTBridge picks up COT_OUTBOUND and forwards to TAK.
+//
+// TWO DEPLOYMENT MODES
+// --------------------
+// 1. Multi-vehicle (shoreside sim)
+//    One pCoTContact instance on the shoreside sees all six
+//    vehicles' NODE_REPORTs and publishes each as a colored
+//    SA contact — blue team as friendly, red as hostile.
+//
+// 2. Single-vehicle (hardware, on the robot)
+//    Each robot runs its own pCoTContact. It sees only its
+//    own NODE_REPORT_LOCAL and publishes one friendly contact.
+//
+// WHAT APPEARS IN ATAK
+// --------------------
+//   Friendly (own team) → blue surface vessel icon  (a-f-S-C-U-N)
+//   Hostile  (red team) → red  surface vessel icon  (a-h-S-C-U-N)
+//   Contact updates at 1s when moving, 3s when stationary.
+//   Contact expires in ATAK after cot_stale_offset seconds
+//   with no update.
+//
+// MOOS INTERFACE
+// --------------
+//   Subscribes: NODE_REPORT, NODE_REPORT_LOCAL
+//   Publishes:  COT_OUTBOUND (raw CoT XML)
+// ============================================================
+
+
+// ============================================================
+// EXAMPLE 1 — Multi-vehicle mode (shoreside sim)
+//
+// Run on the shoreside computer alongside pCoTBridge.
+// All six CTF vehicle NODE_REPORTs are available on the
+// shoreside MOOSDB via uFldNodeBroker.
+// ============================================================
+
+ProcessConfig = pCoTContact
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  //----------------------------------------------------------
+  // own_vehicles — comma-separated list of friendly vehicles.
+  // These appear as BLUE (friendly) SA contacts in ATAK.
+  // Names must match the NAME= field in their NODE_REPORTs.
+  //----------------------------------------------------------
+  own_vehicles = blue_one,blue_two,blue_three
+
+  //----------------------------------------------------------
+  // hostile_vehicles — comma-separated list of hostile vehicles.
+  // These appear as RED (hostile) SA contacts in ATAK.
+  //----------------------------------------------------------
+  hostile_vehicles = red_one,red_two,red_three
+
+  //----------------------------------------------------------
+  // Send rate — moving contacts update more frequently.
+  // speed_threshold (m/s) determines moving vs. stationary.
+  //----------------------------------------------------------
+  moving_send_interval     = 1.0   // seconds between updates when speed > threshold
+  stationary_send_interval = 3.0   // seconds between updates when speed <= threshold
+  speed_threshold          = 0.5   // m/s — above this = moving
+
+  //----------------------------------------------------------
+  // Stale offset — how long ATAK keeps the contact visible
+  // after the last update. 10s matches the typical 3s send
+  // rate with margin for minor connectivity hiccups.
+  //----------------------------------------------------------
+  cot_stale_offset = 10.0   // seconds
+
+  debug = false
+}
+
+
+// ============================================================
+// EXAMPLE 2 — Single-vehicle mode (hardware, on the robot)
+//
+// Run on the robot's own computer. Only sees NODE_REPORT_LOCAL
+// from its own pNodeReporter. Publishes one friendly contact.
+//
+// own_vehicle is optional — pCoTContact will auto-learn the
+// vehicle name from the first NODE_REPORT it receives.
+// Setting it explicitly is recommended to catch config errors.
+// ============================================================
+
+// ProcessConfig = pCoTContact
+// {
+//   AppTick   = 4
+//   CommsTick = 4
+//
+//   // Single-vehicle mode — only own_vehicle, no hostile list.
+//   // Set to the RNAME of this robot (e.g. blue_one).
+//   // In wp_2025 missions this is passed via nsplug: $(RNAME)
+//   own_vehicle = blue_one
+//
+//   moving_send_interval     = 1.0
+//   stationary_send_interval = 3.0
+//   speed_threshold          = 0.5
+//   cot_stale_offset         = 10.0
+//
+//   debug = false
+// }
+
+
+// ============================================================
+// EXAMPLE 3 — Standalone test (no full mission stack)
+//
+// Minimal two-app mission to verify ATAK contact display
+// without running the full Aquaticus fleet.
+// Run with: pAntler contact_test.moos
+// ============================================================
+
+// ServerHost = localhost
+// ServerPort = 9000
+// Community  = contact_test
+//
+// ProcessConfig = ANTLER
+// {
+//   MSBetweenLaunches = 200
+//   Run = MOOSDB        @ NewConsole = false
+//   Run = pCoTContact   @ NewConsole = true
+//   Run = pCoTBridge    @ NewConsole = true
+//   Run = uPokeDB       @ NewConsole = true   // inject test NODE_REPORTs
+// }
+//
+// ProcessConfig = pCoTContact
+// {
+//   AppTick   = 4
+//   CommsTick = 4
+//   own_vehicles     = blue_one
+//   hostile_vehicles = red_one
+//   moving_send_interval     = 1.0
+//   stationary_send_interval = 3.0
+//   debug = true
+// }
+//
+// ProcessConfig = pCoTBridge
+// {
+//   AppTick   = 4
+//   CommsTick = 4
+//   tak_host = 192.168.0.38
+//   tak_port = 8088
+// }
+//
+// Inject a test contact with uPokeDB:
+//   uPokeDB contact_test.moos \
+//     NODE_REPORT="NAME=blue_one,LAT=41.3490,LON=-74.0640,HDG=45.0,SPD=1.5,TIME=1000.0"
+//   uPokeDB contact_test.moos \
+//     NODE_REPORT="NAME=red_one,LAT=41.3470,LON=-74.0600,HDG=225.0,SPD=0.0,TIME=1000.0"
