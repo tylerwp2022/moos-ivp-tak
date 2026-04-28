@@ -65,9 +65,6 @@ protected:
   // Format a MOOS time as a CoT timestamp string
   std::string formatCoTTime(double moos_time, double offset_sec = 0.0);
 
-  // Validate that a given affiliation character is legal
-  bool validAffiliation(const std::string& affil);
-
 private:
   // --------------------------------------------------------
   // Contact configuration (set in ProcessConfig, immutable
@@ -78,7 +75,12 @@ private:
   double      m_hae;           // height above ellipsoid (meters, default 0)
   std::string m_callsign;      // contact callsign displayed in ATAK
   std::string m_uid;           // CoT UID (auto-generated from callsign if empty)
-  std::string m_affiliation;   // "f", "h", "n", or "u"
+  std::string m_team_color;    // ATAK team color — sets <__group name="..."/>
+                                // Values: Green, Cyan, Blue, Red, Yellow,
+                                //         White, Magenta, Orange
+                                // Affiliation is always 'f' (friendly) —
+                                // required for contact to appear in ATAK
+                                // contacts list.
 
   // --------------------------------------------------------
   // Send rate

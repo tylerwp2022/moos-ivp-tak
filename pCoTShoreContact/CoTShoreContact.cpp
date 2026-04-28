@@ -25,7 +25,7 @@ CoTShoreContact::CoTShoreContact()
   m_hae          = 0.0;
   m_callsign     = "SHORE";
   m_uid          = "";           // auto-generated in OnStartUp if empty
-  m_affiliation  = "f";          // default: friendly
+  m_team_color   = "Green";      // default: green icon
 
   m_send_interval = 30.0;        // resend every 30s — shore is static so
                                   // no need for the 1-3s rate used by moving
@@ -140,16 +140,11 @@ bool CoTShoreContact::OnStartUp()
       m_uid = value;
       debugLog("Config: uid = " + m_uid);
     }
-    else if(param == "affiliation") {
-      string a = tolower(value);
-      if(validAffiliation(a)) {
-        m_affiliation = a;
-        debugLog("Config: affiliation = " + m_affiliation);
-      }
-      else {
-        reportConfigWarning("pCoTShoreContact: affiliation must be f/h/n/u, "
-                            "got '" + value + "' — defaulting to 'f'");
-      }
+    else if(param == "team_color") {
+      // Preserve case — ATAK team color names are capitalized
+      string v = orig; biteStringX(v, '=');
+      m_team_color = stripBlankEnds(v);
+      debugLog("Config: team_color = " + m_team_color);
     }
     else if(param == "send_interval") {
       m_send_interval = atof(value.c_str());
@@ -291,12 +286,9 @@ string CoTShoreContact::buildContactCoT()
   string t_now   = formatCoTTime(m_curr_time, 0.0);
   string t_stale = formatCoTTime(m_curr_time, m_cot_stale_sec);
 
-  string affil = m_affiliation;  // "f", "h", "n", or "u"
-
-  // CoT type and icon path both encode the affiliation
-  // G-U-C = ground unit combatant — appears in the ATAK contacts list.
-  // G-E (equipment) only appears on the map, not in contacts.
-  string cot_type = "a-" + affil + "-G-U-C";
+  // Affiliation always f — required for ATAK contacts list.
+  // Color is controlled by <__group name="..."/> (m_team_color).
+  string cot_type = "a-f-G-E";
 
   // SA contact detail block — matches real ATAK contact format.
   // Key elements that place this in the contacts list (not just on map):
@@ -313,7 +305,7 @@ string CoTShoreContact::buildContactCoT()
   string detail =
     "<detail>"
       "<contact callsign=\"" + m_callsign + "\" endpoint=\"*:-1:stcp\"/>"
-      "<__group name=\"Cyan\" role=\"HQ\"/>"
+      "<__group name=\"" + m_team_color + "\" role=\"HQ\"/>"
       "<uid Droid=\"" + m_callsign + "\"/>"
       "<takv"
         " device=\"Shoreside\""
@@ -346,15 +338,6 @@ string CoTShoreContact::buildContactCoT()
 }
 
 
-// ============================================================
-// validAffiliation()
-// ============================================================
-
-bool CoTShoreContact::validAffiliation(const std::string& affil)
-{
-  return (affil == "f" || affil == "h" ||
-          affil == "n" || affil == "u");
-}
 
 
 // ============================================================
@@ -387,19 +370,13 @@ bool CoTShoreContact::buildReport()
     return true;
   }
 
-  string affil_label;
-  if     (m_affiliation == "f") affil_label = "friendly";
-  else if(m_affiliation == "h") affil_label = "hostile";
-  else if(m_affiliation == "n") affil_label = "neutral";
-  else                          affil_label = "unknown";
-
-  m_msgs << "Contact:     " << m_callsign
-         << " [" << affil_label << "]" << endl;
+  m_msgs << "Contact:     " << m_callsign << endl;
+  m_msgs << "Team color:  " << m_team_color << endl;
   m_msgs << "UID:         " << m_uid << endl;
   m_msgs << "Position:    " << doubleToStringX(m_lat, 7)
          << ", "            << doubleToStringX(m_lon, 7)
          << "  hae="        << doubleToStringX(m_hae, 1) << "m" << endl;
-  m_msgs << "CoT type:    a-" << m_affiliation << "-G-U-C" << endl;
+  m_msgs << "CoT type:    a-f-G-E (always friendly)" << endl;
   m_msgs << endl;
   m_msgs << "Send interval: " << doubleToStringX(m_send_interval, 0)
          << "s   Stale: "
