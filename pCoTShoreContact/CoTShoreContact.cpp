@@ -294,8 +294,9 @@ string CoTShoreContact::buildContactCoT()
   string affil = m_affiliation;  // "f", "h", "n", or "u"
 
   // CoT type and icon path both encode the affiliation
-  string cot_type  = "a-" + affil + "-G-E";
-  string icon_path = "COT_MAPPING_2525C/a-" + affil + "/a-" + affil + "-G";
+  // G-U-C = ground unit combatant — appears in the ATAK contacts list.
+  // G-E (equipment) only appears on the map, not in contacts.
+  string cot_type = "a-" + affil + "-G-U-C";
 
   // SA contact detail block — matches real ATAK contact format.
   // Key elements that place this in the contacts list (not just on map):
@@ -308,18 +309,20 @@ string CoTShoreContact::buildContactCoT()
   // Intentionally omitted (these cause map-marker behavior, not contact):
   //   <archive/>           — makes ATAK treat it as a persistent drawing
   //   <usericon>           — custom icon path used for drawings/markers
+  // Element order matches live ATAK contact captures — do not reorder.
   string detail =
     "<detail>"
       "<contact callsign=\"" + m_callsign + "\" endpoint=\"*:-1:stcp\"/>"
-      "<uid Droid=\"" + m_callsign + "\"/>"
       "<__group name=\"Cyan\" role=\"HQ\"/>"
+      "<uid Droid=\"" + m_callsign + "\"/>"
       "<takv"
         " device=\"Shoreside\""
         " platform=\"pCoTShoreContact\""
         " os=\"Linux\""
         " version=\"1.0.0\"/>"
+      "<track speed=\"0.0\" course=\"0.0\"/>"
       "<status battery=\"100\"/>"
-      "<track course=\"0.0\" speed=\"0.0\"/>"
+      "<precisionlocation geopointsrc=\"USER\" altsrc=\"SRTM1\"/>"
     "</detail>";
 
   return
@@ -396,7 +399,7 @@ bool CoTShoreContact::buildReport()
   m_msgs << "Position:    " << doubleToStringX(m_lat, 7)
          << ", "            << doubleToStringX(m_lon, 7)
          << "  hae="        << doubleToStringX(m_hae, 1) << "m" << endl;
-  m_msgs << "CoT type:    a-" << m_affiliation << "-G-E" << endl;
+  m_msgs << "CoT type:    a-" << m_affiliation << "-G-U-C" << endl;
   m_msgs << endl;
   m_msgs << "Send interval: " << doubleToStringX(m_send_interval, 0)
          << "s   Stale: "
