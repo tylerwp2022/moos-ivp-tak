@@ -34,6 +34,26 @@ ProcessConfig = pCoTGraphics
   // active=false sends a delete CoT to remove the line.
   publish_view_seglists = true
 
+  // ---- VIEW_POLYGON / UTM_ZONE_* → CoT filled polygon (u-d-f) ----
+  // Converts VIEW_POLYGON (uFldFlagManager grab zone circles) and
+  // UTM_ZONE_ONE/TWO (uFldTagManager team zone boundaries) to
+  // closed filled polygons visible on the ATAK map.
+  //   UTM_ZONE_ONE = red team boundary (pink fill)
+  //   UTM_ZONE_TWO = blue team boundary (light blue fill)
+  publish_view_polygons = true
+
+  // ---- FLAG_SUMMARY / VIEW_MARKER → CoT colored flag markers (b-m-p-s-m) ----
+  // Converts FLAG_SUMMARY (all flags at startup, '#'-delimited) and
+  // VIEW_MARKER (single flag update on grab/return) to colored
+  // spot markers on the ATAK map. Icon color matches flag team color.
+  publish_flag_markers = true
+
+  // ---- VIEW_TEXTBOX → CoT text label (b-m-p-s-m/LABEL) ----
+  // Converts VIEW_TEXTBOX (uFldFlagManager score display) to a
+  // text annotation on the ATAK map. The score string "RED:0 BLUE:0"
+  // is rendered as a label at the post_score=$(XE) field position.
+  publish_score_label = true
+
   // ---- Send throttle ----
   // Seconds between re-sends for throttled graphics.
   // Applies to VIEW_SEGLISTs and throttled VIEW_POINTs.

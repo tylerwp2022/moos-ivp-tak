@@ -61,6 +61,16 @@ void showExampleConfigAndExit()
   blu("  publish_view_points    = true                                 ");
   blu("  publish_view_seglists  = true                                 ");
   blk("                                                                ");
+  blk("  // VIEW_POLYGON + UTM_ZONE_ONE/TWO → filled polygons         ");
+  blk("  // (uFldFlagManager grab zones, uFldTagManager team zones)    ");
+  blu("  publish_view_polygons  = true                                 ");
+  blk("                                                                ");
+  blk("  // FLAG_SUMMARY + VIEW_MARKER → colored flag spot markers    ");
+  blu("  publish_flag_markers   = true                                 ");
+  blk("                                                                ");
+  blk("  // VIEW_TEXTBOX → text label (score display)                 ");
+  blu("  publish_score_label    = true                                 ");
+  blk("                                                                ");
   blk("  // Send VIEW_POINTs immediately on every update (no throttle) ");
   blk("  // Required for trackpt to stay in sync with pMarineViewer   ");
   blu("  immediate_view_points  = true                                 ");

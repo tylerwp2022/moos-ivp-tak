@@ -874,6 +874,7 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
       "<height_unit value=\"4\"/>"
       "<remarks/>"
       "<archive/>"
+      "<__shapeExtras cpvis=\"false\"/>"
       + link_xml +
     "</detail>";
 
@@ -937,6 +938,7 @@ string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
       "<height_unit value=\"4\"/>"
       "<remarks/>"
       "<archive/>"
+      "<__shapeExtras cpvis=\"false\"/>"
       + link_xml +
     "</detail>";
 
