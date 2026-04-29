@@ -116,6 +116,30 @@ private:
   double m_cot_stale_offset;          // seconds until ATAK marks contact stale
 
   // --------------------------------------------------------
+  // Single-vehicle affiliation and team color
+  //
+  // These two params are freely combinable — team_color is
+  // included in the CoT <__group> element whenever it is
+  // non-empty, regardless of affiliation. This lets the caller
+  // control both icon appearance and contacts-list visibility
+  // independently:
+  //
+  //   affiliation=f, team_color=Cyan → friendly cyan,  IN contacts list
+  //   affiliation=f, team_color=Red  → friendly red,   IN contacts list
+  //   affiliation=h, team_color=Red  → hostile red,    IN contacts list
+  //   affiliation=h (no team_color)  → hostile diamond, MAP ONLY
+  //
+  // In multi-vehicle mode, affiliation is derived per-vehicle
+  // from m_own_set / m_hostile_set membership; team_color from
+  // config applies to all vehicles tracked by this instance.
+  //
+  // In single-vehicle mode, set both from the plug file using
+  // nsplug #ifdef VTEAM for per-team control.
+  // --------------------------------------------------------
+  std::string m_affiliation;   // "f" | "h" | "n" | "u" (default: "f")
+  std::string m_team_color;    // ATAK team color string, or empty for map-only
+
+  // --------------------------------------------------------
   // Debug
   // --------------------------------------------------------
   bool m_debug;

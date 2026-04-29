@@ -76,6 +76,14 @@ void showExampleConfigAndExit()
   blk("//   AppTick   = 4                                              ");
   blk("//   CommsTick = 4                                              ");
   blk("//   own_vehicle = blue_one   // auto-learned if omitted        ");
+  blk("//                                                              ");
+  blk("//   // affiliation: f=friendly, h=hostile, n=neutral, u=unknown");
+  blk("//   // In wp_2025, set via nsplug #ifdef VTEAM in plug file:   ");
+  blk("//   //   blue team: affiliation=f, team_color=Cyan             ");
+  blk("//   //   red  team: affiliation=h  (team_color unused)         ");
+  blk("//   affiliation = f                                            ");
+  blk("//   team_color  = Cyan   // ATAK icon color for friendly only  ");
+  blk("//                                                              ");
   blk("//   moving_send_interval     = 1.0                             ");
   blk("//   stationary_send_interval = 3.0                             ");
   blk("// }                                                            ");

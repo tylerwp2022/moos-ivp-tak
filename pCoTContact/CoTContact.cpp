@@ -28,6 +28,9 @@ CoTContact::CoTContact()
   m_speed_threshold          = 0.5;
   m_cot_stale_offset         = 10.0;
 
+  m_affiliation = "f";      // default: friendly
+  m_team_color  = "Cyan";   // default: blue team color
+
   m_debug        = false;
   m_pos_cot_sent = 0;
 }
@@ -145,6 +148,28 @@ bool CoTContact::OnStartUp()
       m_cot_stale_offset = atof(value.c_str());
       debugLog("Config: cot_stale_offset = " +
                doubleToStringX(m_cot_stale_offset) + "s");
+    }
+    else if(param == "affiliation") {
+      // f=friendly, h=hostile, n=neutral, u=unknown
+      // Used in single-vehicle mode to set the CoT type.
+      // In multi-vehicle mode, affiliation is derived from
+      // own_vehicles / hostile_vehicles membership.
+      m_affiliation = value;
+      if(m_affiliation != "f" && m_affiliation != "h" &&
+         m_affiliation != "n" && m_affiliation != "u") {
+        reportConfigWarning("pCoTContact: invalid affiliation '" +
+                            m_affiliation + "' — use f/h/n/u. Defaulting to f.");
+        m_affiliation = "f";
+      }
+      debugLog("Config: affiliation = " + m_affiliation);
+    }
+    else if(param == "team_color") {
+      // Preserve original case — ATAK team color names are capitalized.
+      // Only used for friendly contacts (<__group name="..."/>).
+      // Valid values: Cyan, Blue, Red, Green, Yellow, White, Magenta, Orange
+      string v = orig; biteStringX(v, '=');
+      m_team_color = stripBlankEnds(v);
+      debugLog("Config: team_color = " + m_team_color);
     }
     else
       handled = false;
@@ -341,17 +366,35 @@ bool CoTContact::parseNodeReport(const std::string& report)
 
 string CoTContact::buildPositionCoT(const VehicleState& vs)
 {
-  string cot_type = vs.friendly ? "a-f-S-C-U-N" : "a-h-S-C-U-N";
+  // In multi-vehicle mode, affiliation comes from own_set/hostile_set.
+  // In single-vehicle mode, it comes from the m_affiliation config param.
+  string affil = m_multi_mode
+    ? (vs.friendly ? "f" : "h")
+    : m_affiliation;
+
+  string cot_type = "a-" + affil + "-S-C-U-N";
   string uid      = "surveyor-" + vs.name;
 
   string t_now   = formatCoTTime(vs.timestamp, 0.0);
   string t_stale = formatCoTTime(vs.timestamp, m_cot_stale_offset);
 
+  // __group element — included whenever team_color is configured.
+  // Controls icon color and contacts-list visibility in ATAK:
+  //   affiliation=f + team_color=Cyan → friendly cyan icon, IN contacts list
+  //   affiliation=f + team_color=Red  → friendly red icon,  IN contacts list
+  //   affiliation=h + team_color=Red  → hostile red icon,   IN contacts list
+  //   affiliation=h (no team_color)   → hostile diamond,   MAP ONLY
+  // Omit team_color entirely (leave empty) to suppress contacts list entry.
+  string group_elem = "";
+  if(!m_team_color.empty())
+    group_elem = "<__group name=\"" + m_team_color +
+                 "\" role=\"Team Member\"/>";
+
   string detail =
     "<detail>"
       "<contact callsign=\"" + vs.name + "\""
                " endpoint=\"*:-1:stcp\"/>"
-      "<__group name=\"Cyan\" role=\"Team Member\"/>"
+    + group_elem +
       "<uid Droid=\""        + vs.name + "\"/>"
       "<takv"
         " device=\"SeaRobotics-Surveyor\""
