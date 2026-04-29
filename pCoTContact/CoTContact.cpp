@@ -28,8 +28,8 @@ CoTContact::CoTContact()
   m_speed_threshold          = 0.5;
   m_cot_stale_offset         = 10.0;
 
-  m_affiliation = "f";      // default: friendly
-  m_team_color  = "Cyan";   // default: blue team color
+  m_affiliation = "f";   // default: friendly
+  m_team_color  = "";    // default: no __group element (map-only if no team_color set)
 
   m_debug        = false;
   m_pos_cot_sent = 0;
