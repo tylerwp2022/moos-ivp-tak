@@ -838,19 +838,19 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   // ========================================================
   else if(cmd == "help") {
     string help_msg =
-      "Commands (use underscores: blue_one, red_two):\n"
-      "deploy          — activate vehicle(s)\n"
-      "return / rtb    — send to base\n"
-      "station / hold  — hold position\n"
-      "pause           — manual override on\n"
-      "play            — start game\n"
-      "stop            — stop game\n"
-      "status          — deployment state\n"
-      "attack          — ATTACK_MED (all)\n"
-      "defend          — DEFEND_MED (all)\n"
-      "attack easy     — ATTACK_E (all)\n"
-      "defend easy     — DEFEND_E (all)\n"
-      "<v> <cmd>       — target one vehicle\n"
+      "Commands (use underscores: blue_one, red_two):&#10;"
+      "deploy          - activate vehicle(s)&#10;"
+      "return / rtb    - send to base&#10;"
+      "station / hold  - hold position&#10;"
+      "pause           - manual override on&#10;"
+      "play            - start game&#10;"
+      "stop            - stop game&#10;"
+      "status          - deployment state&#10;"
+      "attack          - ATTACK_MED (all)&#10;"
+      "defend          - DEFEND_MED (all)&#10;"
+      "attack easy     - ATTACK_E (all)&#10;"
+      "defend easy     - DEFEND_E (all)&#10;"
+      "<v> <cmd>       - target one vehicle&#10;"
       "  e.g. blue_one attack, red_two deploy";
     Notify("ATAK_CHAT_OUT",
            "message=" + help_msg + "|chatroom=" + reply_to);
