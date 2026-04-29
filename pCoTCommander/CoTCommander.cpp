@@ -691,7 +691,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     // Anything else is treated as a vehicle name prefix.
     static const set<string> cmd_keywords = {
       "deploy", "return", "rtb", "station", "hold", "pause",
-      "play", "stop", "status", "attack", "defend"
+      "play", "stop", "status", "attack", "defend", "help"
     };
 
     size_t space      = cmd.find(' ');
@@ -831,6 +831,30 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     Notify("ATAK_CHAT_OUT",
            "message=" + status + "|chatroom=" + reply_to);
     debugLog("handleChatCommand: status reply to " + reply_to);
+  }
+
+  // ========================================================
+  // Help — list available commands
+  // ========================================================
+  else if(cmd == "help") {
+    string help_msg =
+      "Commands (use underscores: blue_one, red_two):\n"
+      "deploy          — activate vehicle(s)\n"
+      "return / rtb    — send to base\n"
+      "station / hold  — hold position\n"
+      "pause           — manual override on\n"
+      "play            — start game\n"
+      "stop            — stop game\n"
+      "status          — deployment state\n"
+      "attack          — ATTACK_MED (all)\n"
+      "defend          — DEFEND_MED (all)\n"
+      "attack easy     — ATTACK_E (all)\n"
+      "defend easy     — DEFEND_E (all)\n"
+      "<v> <cmd>       — target one vehicle\n"
+      "  e.g. blue_one attack, red_two deploy";
+    Notify("ATAK_CHAT_OUT",
+           "message=" + help_msg + "|chatroom=" + reply_to);
+    debugLog("handleChatCommand: help reply to " + reply_to);
   }
 
   // ========================================================
