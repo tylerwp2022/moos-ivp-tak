@@ -264,10 +264,21 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
 
     // --------------------------------------------------------
     // VIEW_POLYGON — closed filled polygon (flag grab zones)
+    //
+    // Filtered: labels containing "opreg" are silently dropped.
+    // BHV_OpRegionRecover publishes the full field boundary as a
+    // VIEW_POLYGON with label "<vehicle>:recover:opreg" for every
+    // deployed vehicle. These cover the entire field with a solid
+    // white fill and are useful in pMarineViewer but serve no
+    // purpose in ATAK — they would obscure the team zone overlays.
     // --------------------------------------------------------
     else if(key == "VIEW_POLYGON" && m_publish_view_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "")) {
+        if(vp.label.find("opreg") != string::npos) {
+          debugLog("VIEW_POLYGON: skipping opreg polygon " + vp.label);
+          continue;
+        }
         bool is_new = !m_view_polygons.count(vp.label);
         if(!is_new) vp.last_sent = m_view_polygons[vp.label].last_sent;
         m_view_polygons[vp.label] = vp;
