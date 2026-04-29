@@ -7,17 +7,40 @@
 /*  pCoTCommander — inbound CoT command dispatcher.         */
 /*                                                          */
 /*  Subscribes to COT_INBOUND (raw CoT XML published by     */
-/*  pCoTBridge) and translates operator commands from ATAK  */
-/*  into MOOS variable publications for pHelmIvP behaviors. */
+/*  pCoTBridge) and ATAK_CHAT_IN (published by pCoTChat)    */
+/*  and translates operator commands from ATAK into MOOS    */
+/*  variable publications for pHelmIvP behaviors.           */
+/*                                                          */
+/*  TWO DEPLOYMENT MODES                                    */
+/*  ─────────────────────────────────────────────────────── */
+/*  fleet_mode = true  (runs on SHORESIDE MOOSDB):          */
+/*    command_chatroom = AQUATICUS-SHORE                     */
+/*    Chat commands post *_ALL variables, which             */
+/*    uFldShoreBroker routes to all vehicle communities.    */
+/*    Per-vehicle roles use "<vehicle> attack|defend".      */
+/*                                                          */
+/*  fleet_mode = false (runs on VEHICLE MOOSDB):            */
+/*    command_chatroom = <vehicle callsign, e.g. blue_one>  */
+/*    Chat commands post bare variable names directly       */
+/*    on that vehicle's MOOSDB.                             */
+/*    Role commands use bare "attack|defend" (no prefix).   */
+/*    PREREQUISITE: ATAK_CHAT_IN and COT_INBOUND must be    */
+/*    shared from shore to the vehicle via pShare.          */
 /*                                                          */
 /*  Architecture:                                           */
 /*    TAK Server                                            */
 /*      ↓ (TCP)                                             */
 /*    pCoTBridge → COT_INBOUND                              */
+/*    pCoTChat   → ATAK_CHAT_IN                             */
 /*                      ↓                                   */
 /*               pCoTCommander                              */
 /*                      ↓                                   */
-/*    ATAK_ACTIVE=true + ATAK_WPT_UPDATE → pHelmIvP        */
+/*    CoT commands  → ATAK_ACTIVE + ATAK_WPT_UPDATE         */
+/*    Chat commands → DEPLOY[_ALL], RETURN[_ALL],           */
+/*                    STATION_KEEP[_ALL],                   */
+/*                    MOOS_MANUAL_OVERRIDE[_ALL],           */
+/*                    AQUATICUS_GAME_ALL (fleet only),       */
+/*                    ACTION[_<VEHICLE>]                    */
 /*                                                          */
 /*  Handled CoT types:                                      */
 /*    b-m-p-w-GOTO → waypoint command                       */
@@ -28,17 +51,37 @@
 /*        condition = ATAK_ACTIVE = true                    */
 /*        updates   = ATAK_WPT_UPDATE                       */
 /*                                                          */
+/*  Supported chat commands (via ATAK GeoChat):             */
+/*    deploy          → DEPLOY[_ALL]=true + overrides       */
+/*    return | rtb    → RETURN[_ALL]=true                   */
+/*    station | hold  → STATION_KEEP[_ALL]=true             */
+/*    pause           → MOOS_MANUAL_OVERRIDE[_ALL]=true     */
+/*    play            → AQUATICUS_GAME_ALL=play (fleet only)*/
+/*    stop            → AQUATICUS_GAME_ALL=pause (fleet only*/
+/*    status          → DM reply with deployment state      */
+/*    <v> attack|defend → ACTION_<V>=ATTACK/DEFEND_MED      */
+/*                        (fleet mode, e.g. "blue_one attack")*/
+/*    attack|defend   → ACTION=ATTACK/DEFEND_MED            */
+/*                        (vehicle mode)                    */
+/*                                                          */
 /*  Adding new command types:                               */
-/*    1. Add a handler method (e.g. handleChatCoT)          */
-/*    2. Add a case in dispatchInboundCoT()                 */
-/*    3. No changes needed in pCoTBridge                    */
+/*    CoT: add a handler method + case in dispatchInboundCoT*/
+/*    Chat: add a branch in handleChatCommand()             */
+/*    No changes needed in pCoTBridge                       */
 /*                                                          */
 /*  MOOS Interface:                                         */
 /*    Subscribes: COT_INBOUND    (from pCoTBridge)          */
+/*                ATAK_CHAT_IN   (from pCoTChat)            */
 /*                NODE_REPORT    (for NAV anchor — geodesy) */
 /*                NODE_REPORT_LOCAL                         */
+/*                ATAK_WPT_REACHED (waypt endflag)          */
+/*                DEPLOY          (deployment state)        */
 /*    Publishes:  ATAK_ACTIVE    (bool string)              */
 /*                ATAK_WPT_UPDATE (BHV_Waypoint update str) */
+/*                DEPLOY[_ALL], RETURN[_ALL],               */
+/*                STATION_KEEP[_ALL],                       */
+/*                MOOS_MANUAL_OVERRIDE[_ALL],               */
+/*                AQUATICUS_GAME_ALL, ACTION[_<VEHICLE>]    */
 /************************************************************/
 
 #ifndef COT_COMMANDER_HEADER
@@ -99,6 +142,11 @@ protected:
                           double lat, double lon,
                           const std::string& xml);
 
+  // ATAK_CHAT_IN — GeoChat command from operator.
+  // Parses "callsign=X,chatroom=Y,message=Z", filters on
+  // command_chatroom, dispatches to fleet or vehicle commands.
+  void handleChatCommand(const std::string& moos_val);
+
 private:
   // --------------------------------------------------------
   // Geodesy — LatLon → local XY for waypoint conversion
@@ -125,6 +173,24 @@ private:
   // Whether to enable each command type
   bool m_enable_waypoint_control;
 
+  // --------------------------------------------------------
+  // Chat command config
+  // --------------------------------------------------------
+
+  // Enable/disable the ATAK_CHAT_IN command interface.
+  bool        m_enable_chat_commands;
+
+  // Only process chat messages directed to this chatroom.
+  // Fleet mode:   set to shore callsign (e.g. "AQUATICUS-SHORE")
+  // Vehicle mode: set to the vehicle callsign (e.g. "blue_one")
+  std::string m_command_chatroom;
+
+  // Fleet mode: post *_ALL variables — uFldShoreBroker routes
+  //             them to all vehicle communities.
+  // Vehicle mode: post bare variable names directly on this
+  //               vehicle's MOOSDB.
+  bool        m_fleet_mode;
+
   bool m_debug;
 
   // --------------------------------------------------------
@@ -140,6 +206,7 @@ private:
   unsigned int m_cot_handled;
   unsigned int m_cot_ignored;
   unsigned int m_waypoint_commands;
+  unsigned int m_chat_commands;
   std::string  m_last_command;        // description of last command for AppCast
 
   // Last waypoint sender — used for acknowledgment DM back to operator

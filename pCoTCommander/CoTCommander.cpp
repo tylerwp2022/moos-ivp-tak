@@ -25,13 +25,17 @@ CoTCommander::CoTCommander()
   m_capture_radius         = 15.0;
   m_operator_uid_filter    = "";
   m_enable_waypoint_control = true;
+  m_enable_chat_commands   = true;
+  m_command_chatroom       = "AQUATICUS-SHORE";
+  m_fleet_mode             = true;
   m_debug                  = false;
 
-  m_cot_received  = 0;
-  m_cot_handled   = 0;
-  m_cot_ignored   = 0;
+  m_cot_received    = 0;
+  m_cot_handled     = 0;
+  m_cot_ignored     = 0;
   m_waypoint_commands = 0;
-  m_last_command  = "none";
+  m_chat_commands   = 0;
+  m_last_command    = "none";
 
   m_last_sender_callsign = "";
   m_last_wpt_lat         = 0.0;
@@ -135,6 +139,20 @@ bool CoTCommander::OnStartUp()
       m_operator_uid_filter = stripBlankEnds(v);
       debugLog("Config: operator_uid_filter = " + m_operator_uid_filter);
     }
+    else if(param == "enable_chat_commands") {
+      setBooleanOnString(m_enable_chat_commands, value);
+      debugLog("Config: enable_chat_commands = " +
+               boolToString(m_enable_chat_commands));
+    }
+    else if(param == "command_chatroom") {
+      string v = orig; biteStringX(v, '=');
+      m_command_chatroom = stripBlankEnds(v);
+      debugLog("Config: command_chatroom = " + m_command_chatroom);
+    }
+    else if(param == "fleet_mode") {
+      setBooleanOnString(m_fleet_mode, value);
+      debugLog("Config: fleet_mode = " + boolToString(m_fleet_mode));
+    }
     else if(param == "use_nav_fallback") {
       setBooleanOnString(use_nav_fallback, value);
       debugLog("Config: use_nav_fallback = " + boolToString(use_nav_fallback));
@@ -195,6 +213,9 @@ void CoTCommander::registerVariables()
   // Raw CoT XML from pCoTBridge
   Register("COT_INBOUND", 0);
 
+  // GeoChat commands from ATAK operator via pCoTChat
+  Register("ATAK_CHAT_IN", 0);
+
   // NODE_REPORT — for updating the geodesy NAV anchor.
   Register("NODE_REPORT",       0);
   Register("NODE_REPORT_LOCAL", 0);
@@ -230,6 +251,17 @@ bool CoTCommander::OnNewMail(MOOSMSG_LIST &NewMail)
                intToString((int)sval.size()) + " bytes)");
       if(!dispatchInboundCoT(sval))
         m_cot_ignored++;
+    }
+
+    // --------------------------------------------------------
+    // ATAK_CHAT_IN — GeoChat command from ATAK operator.
+    // Format: callsign=X,chatroom=Y,message=Z
+    // Filtered on m_command_chatroom in handleChatCommand().
+    // --------------------------------------------------------
+    else if(key == "ATAK_CHAT_IN") {
+      debugLog("OnNewMail: ATAK_CHAT_IN = " + sval);
+      if(m_enable_chat_commands)
+        handleChatCommand(sval);
     }
 
     // --------------------------------------------------------
@@ -549,13 +581,17 @@ bool CoTCommander::buildReport()
   m_msgs << endl;
 
   m_msgs << "Commands dispatched:" << endl;
-  m_msgs << "  waypoints=" << m_waypoint_commands << endl;
+  m_msgs << "  waypoints=" << m_waypoint_commands
+         << "  chat="      << m_chat_commands << endl;
   m_msgs << endl;
 
   m_msgs << "Last command: " << m_last_command << endl;
 
   if(!m_operator_uid_filter.empty())
-    m_msgs << "UID filter: " << m_operator_uid_filter << endl;
+    m_msgs << "UID filter:   " << m_operator_uid_filter << endl;
+
+  m_msgs << "Chat mode:    " << (m_fleet_mode ? "fleet (_ALL)" : "vehicle (direct)")
+         << "  chatroom=" << m_command_chatroom << endl;
 
   if(m_debug && !m_debug_msgs.empty()) {
     m_msgs << endl << "-- debug --" << endl;
@@ -564,4 +600,271 @@ bool CoTCommander::buildReport()
   }
 
   return true;
+}
+
+
+
+// ============================================================
+// handleChatCommand()
+//
+// Parses ATAK_CHAT_IN = "callsign=X,chatroom=Y,message=Z"
+// and dispatches fleet or per-vehicle commands when the
+// chatroom matches m_command_chatroom.
+//
+// SUFFIX RESOLUTION (fleet mode):
+//   Default sfx="_ALL" routes to all vehicles via uFldShoreBroker.
+//   If the first word of the message is not a recognized command
+//   keyword, it is treated as a vehicle name:
+//     "blue_one deploy" → sfx="_BLUE_ONE" → DEPLOY_BLUE_ONE=true
+//     "deploy"          → sfx="_ALL"      → DEPLOY_ALL=true
+//     "blue_one attack" → sfx="_BLUE_ONE" → ACTION_BLUE_ONE=ATTACK_MED
+//     "attack"          → sfx="_ALL"      → ACTION_ALL=ATTACK_MED
+//   uFldShoreBroker's qbridge routes *_<VEHICLE> and *_ALL to the
+//   appropriate vehicle MOOSDB as the bare variable name.
+//
+// VEHICLE MODE (fleet_mode=false):
+//   sfx="" — posts directly on this vehicle's own MOOSDB.
+//   Role commands use bare "attack|defend" (implicit vehicle).
+//
+// EXCEPTIONS:
+//   play/stop are fleet-wide only (no per-vehicle game state).
+//   status is always a reply-only query.
+// ============================================================
+
+void CoTCommander::handleChatCommand(const std::string& moos_val)
+{
+  // --------------------------------------------------------
+  // Parse "callsign=X,chatroom=Y,message=Z"
+  // message is always last and may contain commas.
+  // --------------------------------------------------------
+  string callsign, chatroom, message;
+
+  size_t cr_pos  = moos_val.find(",chatroom=");
+  size_t msg_pos = moos_val.find(",message=");
+  if(cr_pos == string::npos || msg_pos == string::npos) {
+    debugLog("handleChatCommand: malformed ATAK_CHAT_IN — " + moos_val);
+    return;
+  }
+
+  size_t cs_pos = moos_val.find("callsign=");
+  if(cs_pos != string::npos)
+    callsign = moos_val.substr(cs_pos + 9, cr_pos - cs_pos - 9);
+
+  chatroom = moos_val.substr(cr_pos  + 10, msg_pos - cr_pos  - 10);
+  message  = moos_val.substr(msg_pos + 9);
+
+  // --------------------------------------------------------
+  // Only process messages directed at our command chatroom.
+  // --------------------------------------------------------
+  if(chatroom != m_command_chatroom) {
+    debugLog("handleChatCommand: chatroom=" + chatroom +
+             " != " + m_command_chatroom + " — ignored");
+    return;
+  }
+
+  // Normalize: lowercase, strip surrounding whitespace
+  string cmd = tolower(message);
+  size_t f = cmd.find_first_not_of(" \t\r\n");
+  if(f == string::npos) return;
+  cmd = cmd.substr(f);
+  size_t l = cmd.find_last_not_of(" \t\r\n");
+  if(l != string::npos) cmd = cmd.substr(0, l + 1);
+
+  debugLog("handleChatCommand: from=" + callsign +
+           " chatroom=" + chatroom + " cmd=[" + cmd + "]");
+
+  string reply_to = callsign.empty() ? "All Chat Rooms" : callsign;
+
+  // --------------------------------------------------------
+  // Resolve variable suffix and effective command.
+  //
+  // Fleet mode: sfx="_ALL" by default. If the first word is not
+  // a recognized command keyword, treat it as a vehicle name and
+  // set sfx="_<VEHICLE_UPPER>" for per-vehicle targeting.
+  //
+  // Vehicle mode: sfx="" — direct post on own MOOSDB.
+  // --------------------------------------------------------
+  string sfx = m_fleet_mode ? "_ALL" : "";
+
+  if(m_fleet_mode) {
+    // Keywords that are valid as the first (or only) word of a command.
+    // Anything else is treated as a vehicle name prefix.
+    static const set<string> cmd_keywords = {
+      "deploy", "return", "rtb", "station", "hold", "pause",
+      "play", "stop", "status", "attack", "defend"
+    };
+
+    size_t space      = cmd.find(' ');
+    string first_word = (space != string::npos) ? cmd.substr(0, space) : cmd;
+
+    if(cmd_keywords.find(first_word) == cmd_keywords.end()) {
+      // First word is not a command keyword — treat as vehicle name.
+      if(space == string::npos) {
+        Notify("ATAK_CHAT_OUT",
+               "message=Unknown command. Use: deploy, return, station, "
+               "pause, play, stop, status, attack, defend, or "
+               "<vehicle> <command> (e.g. blue_one attack)."
+               "|chatroom=" + reply_to);
+        debugLog("handleChatCommand: unrecognized first word=" + first_word);
+        return;
+      }
+      string vehicle = first_word;
+      cmd = cmd.substr(space + 1);
+      size_t rs = cmd.find_first_not_of(" \t");
+      if(rs != string::npos) cmd = cmd.substr(rs);
+      sfx = "_" + toupper(vehicle);
+      debugLog("handleChatCommand: vehicle target=" + vehicle +
+               " sfx=" + sfx + " cmd=" + cmd);
+    }
+  }
+
+  // Human-readable target label for confirmation messages
+  string target;
+  if(sfx.empty())        target = "vehicle";
+  else if(sfx == "_ALL") target = "all vehicles";
+  else                   target = tolower(sfx.substr(1)); // e.g. "blue_one"
+
+  // ========================================================
+  // Deploy
+  // ========================================================
+  if(cmd == "deploy") {
+    Notify("DEPLOY"               + sfx, "true");
+    Notify("MOOS_MANUAL_OVERRIDE" + sfx, "false");
+    Notify("RETURN"               + sfx, "false");
+    Notify("ATAK_CHAT_OUT",
+           "message=Deploying " + target + ".|chatroom=" + reply_to);
+    m_last_command  = "DEPLOY" + sfx + " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] DEPLOY" + sfx +
+                " from " + callsign);
+  }
+
+  // ========================================================
+  // Return to base
+  // ========================================================
+  else if(cmd == "return" || cmd == "rtb") {
+    Notify("DEPLOY"               + sfx, "true");
+    Notify("MOOS_MANUAL_OVERRIDE" + sfx, "false");
+    Notify("RETURN"               + sfx, "true");
+    string verb = (sfx == "_ALL") ? "All vehicles returning"
+                                  : (target + " returning");
+    Notify("ATAK_CHAT_OUT",
+           "message=" + verb + " to base.|chatroom=" + reply_to);
+    m_last_command  = "RETURN" + sfx + " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] RETURN" + sfx +
+                " from " + callsign);
+  }
+
+  // ========================================================
+  // Station keep
+  // ========================================================
+  else if(cmd == "station" || cmd == "hold") {
+    Notify("STATION_KEEP" + sfx, "true");
+    string verb = (sfx == "_ALL") ? "All vehicles holding"
+                                  : (target + " holding");
+    Notify("ATAK_CHAT_OUT",
+           "message=" + verb + " position.|chatroom=" + reply_to);
+    m_last_command  = "STATION_KEEP" + sfx + " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] STATION_KEEP" + sfx +
+                " from " + callsign);
+  }
+
+  // ========================================================
+  // Pause (manual override)
+  // ========================================================
+  else if(cmd == "pause") {
+    Notify("DEPLOY"               + sfx, "false");
+    Notify("MOOS_MANUAL_OVERRIDE" + sfx, "true");
+    string verb = (sfx == "_ALL") ? "All vehicles paused"
+                                  : (target + " paused");
+    Notify("ATAK_CHAT_OUT",
+           "message=" + verb + ".|chatroom=" + reply_to);
+    m_last_command  = "PAUSE / MOOS_MANUAL_OVERRIDE" + sfx +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] PAUSE" + sfx +
+                " from " + callsign);
+  }
+
+  // ========================================================
+  // Game control — fleet-wide only, no per-vehicle variant
+  // ========================================================
+  else if(cmd == "play" && m_fleet_mode) {
+    if(sfx != "_ALL") {
+      Notify("ATAK_CHAT_OUT",
+             "message=Game control is fleet-wide only — "
+             "omit vehicle name (just: play).|chatroom=" + reply_to);
+    } else {
+      Notify("AQUATICUS_GAME_ALL", "play");
+      Notify("ATAK_CHAT_OUT",
+             "message=Game started.|chatroom=" + reply_to);
+      m_last_command  = "AQUATICUS_GAME_ALL=play (from " + callsign + ")";
+      m_chat_commands++;
+      reportEvent("pCoTCommander: [CHAT] PLAY from " + callsign);
+    }
+  }
+
+  else if(cmd == "stop" && m_fleet_mode) {
+    if(sfx != "_ALL") {
+      Notify("ATAK_CHAT_OUT",
+             "message=Game control is fleet-wide only — "
+             "omit vehicle name (just: stop).|chatroom=" + reply_to);
+    } else {
+      Notify("AQUATICUS_GAME_ALL", "pause");
+      Notify("ATAK_CHAT_OUT",
+             "message=Game stopped.|chatroom=" + reply_to);
+      m_last_command  = "AQUATICUS_GAME_ALL=pause (from " + callsign + ")";
+      m_chat_commands++;
+      reportEvent("pCoTCommander: [CHAT] STOP from " + callsign);
+    }
+  }
+
+  // ========================================================
+  // Status query — reply only, no MOOS posts
+  // ========================================================
+  else if(cmd == "status") {
+    string status = string("Deployed: ") + (m_deployed ? "YES" : "NO");
+    if(!m_fleet_mode)
+      status = m_command_chatroom + " — " + status;
+    Notify("ATAK_CHAT_OUT",
+           "message=" + status + "|chatroom=" + reply_to);
+    debugLog("handleChatCommand: status reply to " + reply_to);
+  }
+
+  // ========================================================
+  // Role assignment — ACTION[+sfx] = ATTACK/DEFEND_*
+  // Works for all sfx variants: _ALL, _BLUE_ONE, or bare.
+  // ========================================================
+  else {
+    string action_val;
+    if     (cmd == "attack"      || cmd == "attack_med")  action_val = "ATTACK_MED";
+    else if(cmd == "attack easy" || cmd == "attack_e")    action_val = "ATTACK_E";
+    else if(cmd == "defend"      || cmd == "defend_med")  action_val = "DEFEND_MED";
+    else if(cmd == "defend easy" || cmd == "defend_e")    action_val = "DEFEND_E";
+
+    if(action_val.empty()) {
+      string help = m_fleet_mode
+        ? "message=Unknown command. Try: deploy, return, station, "
+          "pause, play, stop, status, attack, defend, "
+          "or <vehicle> <command> (e.g. blue_one attack)."
+        : "message=Unknown command. Try: deploy, return, station, "
+          "pause, status, attack, defend.";
+      Notify("ATAK_CHAT_OUT", help + "|chatroom=" + reply_to);
+      debugLog("handleChatCommand: unrecognized cmd=" + cmd);
+      return;
+    }
+
+    string var_name = "ACTION" + sfx;  // ACTION_ALL, ACTION_BLUE_ONE, or ACTION
+    Notify(var_name, action_val);
+    Notify("ATAK_CHAT_OUT",
+           "message=" + target + " -> " + action_val +
+           ".|chatroom=" + reply_to);
+    m_last_command  = var_name + "=" + action_val +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] " + var_name +
+                "=" + action_val + " from " + callsign);
+  }
 }

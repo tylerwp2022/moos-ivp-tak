@@ -15,7 +15,27 @@
 ProcessConfig = pCoTCommander
 {
   AppTick   = 4     // Iterate() fires only on new mail (COMMS_DRIVEN mode)
-  CommsTick = 10    // keep high so COT_INBOUND is picked up quickly
+  CommsTick = 10    // keep high so COT_INBOUND and ATAK_CHAT_IN arrive quickly
+
+  // ---- Chat command interface ----
+  // Operator types a direct message to command_chatroom in ATAK.
+  // pCoTChat publishes it as ATAK_CHAT_IN; pCoTCommander dispatches it.
+  //
+  // fleet_mode=true  (shoreside):
+  //   Posts *_ALL variables — uFldShoreBroker routes to all vehicles.
+  //   command_chatroom must match SHORE_CALLSIGN (AQUATICUS-SHORE).
+  //   Role syntax: "blue_one attack" → ACTION_BLUE_ONE=ATTACK_MED
+  //
+  // fleet_mode=false (per-vehicle, e.g. blue_one):
+  //   Posts bare variable names directly on that vehicle's MOOSDB.
+  //   command_chatroom = this vehicle's callsign (e.g. "blue_one").
+  //   Role syntax: "attack" → ACTION=ATTACK_MED (implicit vehicle)
+  //   PREREQUISITE: share ATAK_CHAT_IN + COT_INBOUND from shore to
+  //   this vehicle via pShare (add output routes in shore pShare,
+  //   input route in vehicle pShare).
+  enable_chat_commands = true
+  command_chatroom     = AQUATICUS-SHORE   // or vehicle callsign in vehicle mode
+  fleet_mode           = true              // false for per-vehicle deployment
 
   // ---- Waypoint control ----
   // "Go To" command (b-m-p-w-GOTO) sent from ATAK:
