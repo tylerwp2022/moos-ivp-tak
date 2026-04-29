@@ -850,7 +850,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       "defend          - DEFEND_MED (all)&#10;"
       "attack easy     - ATTACK_E (all)&#10;"
       "defend easy     - DEFEND_E (all)&#10;"
-      "<v> <cmd>       - target one vehicle&#10;"
+      "vehicle cmd     - target one vehicle&#10;"
       "  e.g. blue_one attack, red_two deploy";
     Notify("ATAK_CHAT_OUT",
            "message=" + help_msg + "|chatroom=" + reply_to);
