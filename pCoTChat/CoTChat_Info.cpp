@@ -57,7 +57,7 @@ void showExampleConfigAndExit()
   blk("ProcessConfig = pCoTChat                                        ");
   blk("{                                                               ");
   blk("  AppTick   = 4                                                 ");
-  blk("  CommsTick = 10                                                ");
+  blk("  CommsTick = 4    // event-driven: COMMS_DRIVEN_ITERATE_AND_MAIL");
   blk("                                                                ");
   blk("  own_callsign = alpha                                          ");
   blk("  // own_uid = surveyor-alpha  // default: surveyor-{callsign} ");
@@ -68,9 +68,11 @@ void showExampleConfigAndExit()
   blk("}                                                               ");
   blk("                                                                ");
   blk("// Outbound usage (post to MOOSDB):                            ");
-  blk("//   ATAK_CHAT_OUT = message=hello,chatroom=All Chat Rooms      ");
-  blk("//   ATAK_CHAT_OUT = message=hello,chatroom=Cyan                ");
-  blk("//   ATAK_CHAT_OUT = message=hello,chatroom=Tyler   // DM       ");
+  blk("// Fields separated by '|' — NOT ',' — because message content ");
+  blk("// may contain commas (e.g. coordinates, lists).               ");
+  blk("//   ATAK_CHAT_OUT = message=hello team|chatroom=All Chat Rooms ");
+  blk("//   ATAK_CHAT_OUT = message=hello team|chatroom=Cyan           ");
+  blk("//   ATAK_CHAT_OUT = message=hello|chatroom=Tyler   // DM       ");
   blk("                                                                ");
   exit(0);
 }
@@ -87,7 +89,8 @@ void showInterfaceAndExit()
   blk("SUBSCRIPTIONS:                                                  ");
   blk("------------------------------------                            ");
   blk("  COT_INBOUND       = <event ...>...</event>  (from pCoTBridge)");
-  blk("  ATAK_CHAT_OUT     = message=X,chatroom=Y                     ");
+  blk("  ATAK_CHAT_OUT     = message=X|chatroom=Y  ('|' separator,    ");
+  blk("                      not ',' — messages may contain commas)   ");
   blk("  NODE_REPORT       = NAME=alpha,LAT=...,LON=...               ");
   blk("  NODE_REPORT_LOCAL = (same format)                             ");
   blk("                                                                ");

@@ -13,7 +13,7 @@ ProcessConfig = pCoTChat
   AppTick   = 4     // event-driven via COMMS_DRIVEN_ITERATE_AND_MAIL
   CommsTick = 10
 
-  // Own vehicle identity — must match pCoTBridge own_vehicle
+  // Own vehicle identity — must match the NAME field in NODE_REPORT
   own_callsign = alpha
   // own_uid = surveyor-alpha  // default: surveyor-{own_callsign}
 

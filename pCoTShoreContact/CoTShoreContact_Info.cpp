@@ -28,9 +28,10 @@ void showSynopsis()
   blk("  reference buoy, observer station, etc. Add one ANTLER         ");
   blk("  instance per contact.                                         ");
   blk("                                                                ");
-  blk("  CoT type: a-{affil}-G-E                                      ");
-  blk("    affil = f (friendly) | h (hostile) |                        ");
-  blk("            n (neutral)  | u (unknown)                          ");
+  blk("  CoT type: a-f-G-E (always friendly)                           ");
+  blk("    Affiliation is fixed as friendly — required for the contact ");
+  blk("    to appear in the ATAK contacts list, not just on the map.   ");
+  blk("    Icon color is controlled by the team_color config param.    ");
 }
 
 void showHelpAndExit()
@@ -74,7 +75,11 @@ void showExampleConfigAndExit()
   blk("  // Optional                                                   ");
   blu("  hae         = 0.0            // height above ellipsoid (m)   ");
   blu("  uid         = shore-001      // auto-generated if omitted     ");
-  blu("  affiliation = f              // f=friendly h=hostile n=neutral u=unknown");
+  blu("  team_color  = Green          // ATAK icon color: Green, Cyan, ");
+  blu("                               //  Blue, Red, Yellow, White,    ");
+  blu("                               //  Magenta, Orange              ");
+  blk("                               // Contact is always friendly    ");
+  blk("                               // (required for contacts list)  ");
   blk("                                                                ");
   blu("  send_interval = 30.0         // seconds between resends       ");
   blu("  stale_seconds = 604800       // 7 days — contact won't expire ");
@@ -101,8 +106,9 @@ void showInterfaceAndExit()
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
   blk("  COT_OUTBOUND = <event ...>...</event>  (raw CoT XML to TAK)  ");
-  blk("    type: a-{affil}-G-E                                         ");
-  blk("    icon: COT_MAPPING_2525C/a-{affil}/a-{affil}-G              ");
+  blk("    type: a-f-G-E (always friendly)                             ");
+  blk("    icon: COT_MAPPING_2525C/a-f/a-f-G                          ");
+  blk("    color: set by team_color param (<__group name=\"...\"/>)    ");
   blk("    how:  h-g-i-g-o                                             ");
   blk("    ce/le: 9999999  (manually entered, no GPS error bound)      ");
   blk("                                                                ");

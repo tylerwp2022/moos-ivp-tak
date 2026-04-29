@@ -1,5 +1,5 @@
 // ============================================================
-// shore_contact.moos
+// pCoTShoreContact_moos.example
 //
 // Minimal standalone mission file for testing pCoTShoreContact
 // in isolation. Runs pCoTShoreContact + pCoTBridge so the shore
@@ -7,7 +7,7 @@
 // mission stack.
 //
 // USAGE:
-//   pAntler shore_contact.moos
+//   pAntler pCoTShoreContact_moos.example
 //
 // REQUIREMENTS:
 //   - TAK server reachable at tak_host:tak_port
@@ -15,11 +15,10 @@
 //
 // WHAT YOU SHOULD SEE IN ATAK:
 //   A ground equipment icon labeled "AQUATICUS-SHORE" at the
-//   position specified below. Icon color depends on affiliation:
-//     f = blue (friendly)
-//     h = red  (hostile)
-//     n = green (neutral)
-//     u = yellow (unknown)
+//   position specified below. Icon color is set by team_color:
+//     Green, Cyan, Blue, Red, Yellow, White, Magenta, Orange
+//   The contact always appears as friendly (a-f-G-E) — required
+//   for it to show up in the ATAK contacts list.
 // ============================================================
 
 ServerHost = localhost
@@ -42,7 +41,7 @@ ProcessConfig = ANTLER
 // pCoTShoreContact
 //
 // Change lat/lon to your actual shore station position.
-// Change affiliation to match your TAK team configuration.
+// Change team_color to match your TAK team configuration.
 //------------------------------------------------------------
 ProcessConfig = pCoTShoreContact
 {
@@ -57,8 +56,12 @@ ProcessConfig = pCoTShoreContact
   hae = 0.0
 
   // Contact identity in ATAK
-  callsign    = AQUATICUS-SHORE
-  affiliation = f    // f=friendly, h=hostile, n=neutral, u=unknown
+  callsign   = AQUATICUS-SHORE
+
+  // ATAK team color — controls icon color in the contacts list.
+  // Options: Green, Cyan, Blue, Red, Yellow, White, Magenta, Orange
+  // The contact always appears as friendly (required for ATAK contacts list).
+  team_color = Green
 
   // Optional: explicit UID. Auto-generated from callsign if omitted.
   // uid = aquaticus-shore-001
@@ -89,16 +92,14 @@ ProcessConfig = pCoTBridge
   tak_host = 192.168.0.38
   tak_port = 8088
 
+  reconnect_interval = 5.0
+  cot_delimiter      = newline  // FreeTAKServer: newline | WinTAK Server: null
+
   // For mTLS (tak_port = 8089):
   // tls_cert_file = certs/shoreside.pem
   // tls_key_file  = certs/shoreside.key
   // tls_ca_file   = certs/shoreside-trusted.pem
   // tls_key_pass  = atakatak
 
-  // In this test file there are no moving vehicles, so
-  // own_vehicle / own_vehicles are not set. pCoTBridge
-  // will still forward COT_OUTBOUND from pCoTShoreContact.
-
-  moving_send_interval     = 1.0
-  stationary_send_interval = 3.0
+  debug = false
 }

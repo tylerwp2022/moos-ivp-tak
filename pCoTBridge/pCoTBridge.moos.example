@@ -1,80 +1,76 @@
-//------------------------------------------
-// pCoTBridge config block
+// ============================================================
+// pCoTBridge_moos.example
 //
-// TWO MODES — use one or the other, not both:
+// pCoTBridge is a pure CoT transport layer. It maintains a
+// TCP/TLS connection to a TAK server and moves bytes in both
+// directions:
 //
-// MODE 1: Single-vehicle (real hardware or one sim vehicle)
-//   Run on the robot's own computer. Only tracks the one
-//   vehicle whose NODE_REPORT this MOOSDB sees.
+//   COT_OUTBOUND (MOOSDB) → TAK server
+//   TAK server → COT_INBOUND (MOOSDB)
 //
-// MODE 2: Multi-vehicle (shoreside sim)
-//   Run on the shore computer. Tracks all listed vehicles.
-//   own_vehicles     = your team (appears as friendly in ATAK)
-//   hostile_vehicles = opponent team (appears as hostile in ATAK)
-//------------------------------------------
+// pCoTBridge does NOT generate CoT. Vehicle SA contacts,
+// map graphics, and chat are produced by sibling apps and
+// posted to COT_OUTBOUND:
+//
+//   pCoTContact      → vehicle SA position contacts
+//   pCoTShoreContact → static position contacts (shore station)
+//   pCoTGraphics     → VIEW_* map overlays
+//   pCoTChat         → GeoChat messages
+//
+// See pCoTContact.moos.example for vehicle contact config.
+// ============================================================
 
-//------------------------------------------
-// MODE 1: Single-vehicle (real hardware / one sim vehicle)
-//
+
+// ============================================================
+// Minimal config — plain TCP (port 8088, no certificates)
+// ============================================================
+
 ProcessConfig = pCoTBridge
 {
-  AppTick   = 10
-  CommsTick = 10
+  AppTick   = 4
+  CommsTick = 4
 
   tak_host = 192.168.0.38
-  tak_port = 8088          // 8088 = unsecure TCP, 8089 = TLS (mTLS)
+  tak_port = 8088          // 8088 = plain TCP, 8089 = mTLS
 
-  // TLS certificates — required when tak_port = 8089.
-  // TLS is enabled automatically when port 8089 is set.
-  // Cert files are in the pCoTBridge/certs/ directory.
-  // tls_cert_file = /home/tyler/moos-ivp/ivp/src/pCoTBridge/certs/shoreside.pem
-  // tls_key_file  = /home/tyler/moos-ivp/ivp/src/pCoTBridge/certs/shoreside.key
-  // tls_ca_file   = /home/tyler/moos-ivp/ivp/src/pCoTBridge/certs/shoreside-trusted.pem
-  //
-  // If the private key is passphrase-protected (BEGIN ENCRYPTED PRIVATE KEY),
-  // provide the passphrase here. OpenSSL decrypts the key in memory —
-  // no plaintext key file is written to disk.
-  // tls_key_pass  = atakatak
+  reconnect_interval = 5.0    // seconds between reconnect attempts
+  cot_delimiter      = newline // FreeTAKServer: newline | WinTAK: null
 
-  own_vehicle = alpha      // must match NAME field in NODE_REPORT
-
-  moving_send_interval     = 1.0    // seconds between CoT sends when moving
-  stationary_send_interval = 3.0    // seconds between CoT sends when stationary
-  speed_threshold          = 0.5    // m/s above which vehicle is "moving"
-  cot_stale_offset         = 10.0   // CoT stale = timestamp + offset (seconds)
-  reconnect_interval       = 5.0    // seconds between TAK server reconnect attempts
-
-  cot_delimiter = newline   // FreeTAKServer: newline | WinTAK Server: null
-
-  debug = false             // true: verbose AppCast output
+  debug = false
 }
 
-//------------------------------------------
-// MODE 2: Multi-vehicle (shoreside sim)
+
+// ============================================================
+// mTLS config — encrypted connection (port 8089)
 //
+// TLS is enabled automatically when tak_port = 8089.
+// Place certificate files in pCoTBridge/certs/:
+//
+//   shoreside.pem          — client certificate
+//   shoreside.key          — client private key
+//   shoreside-trusted.pem  — CA certificate (BEGIN TRUSTED CERTIFICATE)
+//
+// If the private key is passphrase-protected
+// (BEGIN ENCRYPTED PRIVATE KEY), set tls_key_pass.
+// OpenSSL decrypts the key in memory — no plaintext
+// key file is written to disk.
+// ============================================================
+
 // ProcessConfig = pCoTBridge
 // {
-//   AppTick   = 10
-//   CommsTick = 10
+//   AppTick   = 4
+//   CommsTick = 4
 //
 //   tak_host = 192.168.0.38
-//   tak_port = 8088
+//   tak_port = 8089          // TLS enabled automatically on 8089
 //
-//   // Uncomment for TLS (port 8089):
-//   // tls_cert_file = /path/to/certs/shoreside.pem
-//   // tls_key_file  = /path/to/certs/shoreside.key
-//   // tls_ca_file   = /path/to/certs/shoreside-trusted.pem
+//   tls_cert_file = certs/shoreside.pem
+//   tls_key_file  = certs/shoreside.key
+//   tls_ca_file   = certs/shoreside-trusted.pem
+//   tls_key_pass  = atakatak  // omit if key is not passphrase-protected
 //
-//   own_vehicles     = alpha,bravo,charlie   // appear as friendly (a-f-S-C-U-N)
-//   hostile_vehicles = red1,red2,red3        // appear as hostile  (a-h-S-C-U-N)
-//
-//   moving_send_interval     = 1.0
-//   stationary_send_interval = 3.0
-//   speed_threshold          = 0.5
-//   cot_stale_offset         = 10.0
-//   reconnect_interval       = 5.0
-//
-//   cot_delimiter = newline
+//   reconnect_interval = 5.0
+//   cot_delimiter      = newline
 //
 //   debug = false
 // }
