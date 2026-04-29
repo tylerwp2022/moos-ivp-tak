@@ -17,7 +17,15 @@
 /*    command_chatroom = AQUATICUS-SHORE                     */
 /*    Chat commands post *_ALL variables, which             */
 /*    uFldShoreBroker routes to all vehicle communities.    */
-/*    Per-vehicle roles use "<vehicle> attack|defend".      */
+/*    Any command can be prefixed with a vehicle name to    */
+/*    target that vehicle instead of the whole fleet:       */
+/*      "deploy"          → DEPLOY_ALL=true                 */
+/*      "blue_one deploy" → DEPLOY_BLUE_ONE=true            */
+/*      "attack"          → ACTION_ALL=ATTACK_MED           */
+/*      "blue_one attack" → ACTION_BLUE_ONE=ATTACK_MED      */
+/*    Vehicle names must use underscores (blue_one, not     */
+/*    blue one). The prefix works for all commands except   */
+/*    play/stop (fleet-wide only).                          */
 /*                                                          */
 /*  fleet_mode = false (runs on VEHICLE MOOSDB):            */
 /*    command_chatroom = <vehicle callsign, e.g. blue_one>  */
@@ -59,10 +67,11 @@
 /*    play            → AQUATICUS_GAME_ALL=play (fleet only)*/
 /*    stop            → AQUATICUS_GAME_ALL=pause (fleet only*/
 /*    status          → DM reply with deployment state      */
-/*    <v> attack|defend → ACTION_<V>=ATTACK/DEFEND_MED      */
-/*                        (fleet mode, e.g. "blue_one attack")*/
-/*    attack|defend   → ACTION=ATTACK/DEFEND_MED            */
-/*                        (vehicle mode)                    */
+/*    attack|defend   → ACTION[_ALL]=ATTACK/DEFEND_MED      */
+/*    attack|defend easy → ACTION[_ALL]=ATTACK/DEFEND_E     */
+/*    help            → DM reply listing all commands       */
+/*    vehicle <cmd>   → per-vehicle variant of any command  */
+/*                      (fleet mode; use underscores)       */
 /*                                                          */
 /*  Adding new command types:                               */
 /*    CoT: add a handler method + case in dispatchInboundCoT*/

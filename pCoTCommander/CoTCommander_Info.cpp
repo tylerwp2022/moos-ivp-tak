@@ -28,8 +28,10 @@ void showSynopsis()
   blk("    directly on that vehicle's MOOSDB. Chatroom=<callsign>.    ");
   blk("                                                                ");
   blk("  Chat commands: deploy, return, station, pause, play, stop,   ");
-  blk("    status, <vehicle> attack|defend (fleet mode),              ");
-  blk("    attack|defend (vehicle mode).                              ");
+  blk("    status, help, attack, defend (fleet and vehicle modes).    ");
+  blk("  Fleet mode: prefix any command with a vehicle name to target ");
+  blk("    one vehicle: 'blue_one deploy', 'red_two attack'.          ");
+  blk("  Vehicle names require underscores (blue_one, not blue one).  ");
 }
 
 void showHelpAndExit()
@@ -144,6 +146,9 @@ void showInterfaceAndExit()
   blk("                               DEFEND_MED|DEFEND_E             ");
   blk("  ATAK_CHAT_OUT              = message=...|chatroom=<sender>   ");
   blk("    Confirmation DM sent back to command sender.               ");
+  blk("    'help' sends the full command list as a DM.               ");
+  blk("    NOTE: avoid < > & in any ATAK_CHAT_OUT message content    ");
+  blk("    — they are embedded raw in CoT XML and will corrupt it.   ");
   blk("                                                                ");
   exit(0);
 }

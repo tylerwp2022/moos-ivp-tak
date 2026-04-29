@@ -24,15 +24,25 @@ ProcessConfig = pCoTCommander
   // fleet_mode=true  (shoreside):
   //   Posts *_ALL variables — uFldShoreBroker routes to all vehicles.
   //   command_chatroom must match SHORE_CALLSIGN (AQUATICUS-SHORE).
-  //   Role syntax: "blue_one attack" → ACTION_BLUE_ONE=ATTACK_MED
+  //   Prefix any command with a vehicle name to target one vehicle
+  //   instead of the fleet (use underscores: blue_one, red_two):
+  //     "deploy"          → DEPLOY_ALL=true
+  //     "blue_one deploy" → DEPLOY_BLUE_ONE=true
+  //     "attack"          → ACTION_ALL=ATTACK_MED
+  //     "red_two attack"  → ACTION_RED_TWO=ATTACK_MED
+  //   play/stop are fleet-wide only (no vehicle prefix).
+  //   Type "help" to get the full command list as a DM in ATAK.
   //
   // fleet_mode=false (per-vehicle, e.g. blue_one):
   //   Posts bare variable names directly on that vehicle's MOOSDB.
   //   command_chatroom = this vehicle's callsign (e.g. "blue_one").
-  //   Role syntax: "attack" → ACTION=ATTACK_MED (implicit vehicle)
+  //   Commands: deploy, return, station, pause, status, attack, defend.
   //   PREREQUISITE: share ATAK_CHAT_IN + COT_INBOUND from shore to
   //   this vehicle via pShare (add output routes in shore pShare,
   //   input route in vehicle pShare).
+  //
+  // NOTE: avoid < > & in chat messages — they are embedded raw in
+  // CoT XML and will corrupt the event (ATAK silently drops it).
   enable_chat_commands = true
   command_chatroom     = AQUATICUS-SHORE   // or vehicle callsign in vehicle mode
   fleet_mode           = true              // false for per-vehicle deployment
