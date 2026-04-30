@@ -909,16 +909,16 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
 
 
 // ============================================================
-// buildViewPolygonCoT() — polygon (u-d-f), filled or open
+// buildViewPolygonCoT() — closed polygon (u-d-f), filled or unfilled
+//
+// All polygons are closed (vertex[0] repeated at end) so ATAK
+// renders a proper shape boundary regardless of fill.
 //
 // vp.filled=true  (UTM_ZONE_*, VIEW_POLYGON with fill_color):
-//   - <fillColor> element included
-//   - vertex[0] repeated at end to close the shape
-//   (ATAK requires explicit closure for filled polygons)
+//   - <fillColor> element included — colored fill rendered
 //
 // vp.filled=false (BHV_OpRegionRecover opreg bounds, etc.):
-//   - No <fillColor> element — outline only
-//   - No closing vertex — open polyline
+//   - No <fillColor> element — closed outline, no fill
 // ============================================================
 
 string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
@@ -937,12 +937,12 @@ string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
       doubleToStringX(v.first, 7) + "," +
       doubleToStringX(v.second, 7) + ",0.0\"/>";
 
-  // Filled polygons need vertex[0] repeated to close the shape.
-  // Open polygons omit it — ATAK renders them as outlines only.
-  if(vp.filled)
-    link_xml += "<link point=\"" +
-      doubleToStringX(vp.vertices[0].first, 7) + "," +
-      doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
+  // Always close the polygon by repeating vertex[0] — ATAK needs
+  // the explicit closure to render a proper shape boundary.
+  // fillColor is only included when vp.filled=true.
+  link_xml += "<link point=\"" +
+    doubleToStringX(vp.vertices[0].first, 7) + "," +
+    doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
 
   // <fillColor> only included when polygon is filled.
   // Omitting it entirely (not setting it to transparent) is what

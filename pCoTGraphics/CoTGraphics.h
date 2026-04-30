@@ -90,10 +90,10 @@ struct ViewPolygon {
   std::vector<std::pair<double,double>> vertices; // (lat, lon)
   int    fill_color_argb = -2130706433; // default: semi-transparent white
   int    edge_color_argb = -1;          // default: opaque white
-  bool   filled          = false;       // true = include <fillColor> and
-                                        //   repeat vertex[0] to close shape.
-                                        // false = open unfilled polyline
-                                        //   (no <fillColor>, no closing vertex).
+  bool   filled          = false;       // true = include <fillColor> in CoT.
+                                        // false = closed outline, no fill.
+                                        // Polygon is always closed (vertex[0]
+                                        // repeated) regardless of this flag.
                                         // Set true only when fill_color is
                                         // explicitly present in the raw string,
                                         // or when hardcoded (UTM_ZONE_*).
