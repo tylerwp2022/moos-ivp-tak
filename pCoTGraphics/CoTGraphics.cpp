@@ -1013,6 +1013,7 @@ string CoTGraphics::buildViewCircleCoT(const ViewCircle& vc)
         + style_link +
       "</shape>"
       "<__shapeExtras cpvis=\"false\"/>"
+      "<labels_on value=\"false\"/>"
       "<contact callsign=\"" + vc.label + "\"/>"
       "<archive/>"
       "<remarks/>"
