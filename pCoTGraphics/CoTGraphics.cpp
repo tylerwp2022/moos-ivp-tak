@@ -36,6 +36,7 @@ CoTGraphics::CoTGraphics()
   m_publish_view_points      = true;
   m_publish_view_seglists    = true;
   m_publish_view_polygons    = true;
+  m_publish_view_circles     = true;
   m_publish_flag_markers     = true;
   m_publish_score_label      = true;
   m_immediate_view_points    = true;
@@ -47,6 +48,7 @@ CoTGraphics::CoTGraphics()
   m_vp_cot_sent     = 0;
   m_vsl_cot_sent    = 0;
   m_poly_cot_sent   = 0;
+  m_circle_cot_sent = 0;
   m_flag_cot_sent   = 0;
   m_text_cot_sent   = 0;
   m_delete_cot_sent = 0;
@@ -113,6 +115,8 @@ bool CoTGraphics::OnStartUp()
       setBooleanOnString(m_publish_view_seglists, value);
     else if(param == "publish_view_polygons")
       setBooleanOnString(m_publish_view_polygons, value);
+    else if(param == "publish_view_circles")
+      setBooleanOnString(m_publish_view_circles, value);
     else if(param == "publish_flag_markers")
       setBooleanOnString(m_publish_flag_markers, value);
     else if(param == "publish_score_label")
@@ -198,12 +202,10 @@ void CoTGraphics::registerVariables()
   if(m_publish_view_seglists) Register("VIEW_SEGLIST", 0);
   if(m_publish_view_polygons) {
     Register("VIEW_POLYGON",  0);
-    // UTM_ZONE_* are shoreside-only (uFldTagManager).
-    // Don't register on vehicle instances — these variables
-    // don't exist on vehicle MOOSDBs regardless.
     Register("UTM_ZONE_ONE",  0);
     Register("UTM_ZONE_TWO",  0);
   }
+  if(m_publish_view_circles)  Register("VIEW_CIRCLE",  0);
 
   // Flag markers and score label are shoreside-only variables
   // (uFldFlagManager, uFldTagManager). Only register when enabled.
@@ -349,6 +351,32 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     }
 
     // --------------------------------------------------------
+    // VIEW_CIRCLE — circle (u-d-c-c)
+    //
+    // Format: x=...,y=...,radius=...,label=...,
+    //         edge_color=...,fill_color=...,fill_transparency=...,
+    //         active=true/false
+    //
+    // Radius is in meters (same as MOOS local XY units).
+    // Center XY is converted to lat/lon via geodesy.
+    // --------------------------------------------------------
+    else if(key == "VIEW_CIRCLE" && m_publish_view_circles) {
+      ViewCircle vc;
+      if(parseViewCircle(sval, vc)) {
+        if(isLabelBlocked(vc.label)) {
+          debugLog("VIEW_CIRCLE: blocked label=" + vc.label);
+          continue;
+        }
+        bool is_new = !m_view_circles.count(vc.label);
+        if(!is_new) vc.last_sent = m_view_circles[vc.label].last_sent;
+        m_view_circles[vc.label] = vc;
+        debugLog("VIEW_CIRCLE " + string(is_new?"[NEW]":"[UPD]") +
+                 " " + vc.label +
+                 " r=" + doubleToStringX(vc.radius, 1) + "m");
+      }
+    }
+
+    // --------------------------------------------------------
     // FLAG_SUMMARY — all flags '#'-delimited, send immediately
     // --------------------------------------------------------
     else if(key == "FLAG_SUMMARY" && m_publish_flag_markers) {
@@ -441,8 +469,6 @@ bool CoTGraphics::Iterate()
   }
 
   // Throttled VIEW_POLYGONs + UTM_ZONE_*
-  // Zone boundaries are static so the throttle just keeps them
-  // alive in ATAK's cache without generating excessive traffic
   if(m_publish_view_polygons) {
     for(auto& kv : m_view_polygons) {
       ViewPolygon& vp = kv.second;
@@ -451,6 +477,18 @@ bool CoTGraphics::Iterate()
       Notify("COT_OUTBOUND", buildViewPolygonCoT(vp));
       vp.last_sent = m_curr_time;
       m_poly_cot_sent++;
+    }
+  }
+
+  // Throttled VIEW_CIRCLEs
+  if(m_publish_view_circles) {
+    for(auto& kv : m_view_circles) {
+      ViewCircle& vc = kv.second;
+      if(!vc.valid) continue;
+      if((m_curr_time - vc.last_sent) < m_stationary_send_interval) continue;
+      Notify("COT_OUTBOUND", buildViewCircleCoT(vc));
+      vc.last_sent = m_curr_time;
+      m_circle_cot_sent++;
     }
   }
 
@@ -837,6 +875,172 @@ int CoTGraphics::moosColorToArgb(const std::string& color_name,
 
 
 // ============================================================
+// parseViewCircle()
+//
+// Format: x=...,y=...,radius=...,label=...,
+//         edge_color=...,fill_color=...,fill_transparency=...,
+//         active=true/false
+//
+// Radius is in meters (MOOS local XY coordinate units).
+// Center XY is converted to lat/lon via geodesy.
+// active=false removes the circle from tracking and sends delete.
+// ============================================================
+
+bool CoTGraphics::parseViewCircle(const std::string& raw, ViewCircle& vc_out)
+{
+  double x = 0.0, y = 0.0;
+  bool got_x = false, got_y = false, got_r = false, got_label = false;
+  bool active = true;
+  string edge_color  = "white";
+  string fill_color  = "white";
+  double fill_transp = 1.0;   // default: transparent fill (outline only)
+
+  for(auto& tok : parseString(raw, ',')) {
+    string t   = tok;
+    string key = tolower(biteStringX(t, '='));
+    string val = t;
+    if     (key == "x")                { x = atof(val.c_str()); got_x     = true; }
+    else if(key == "y")                { y = atof(val.c_str()); got_y     = true; }
+    else if(key == "radius")           { vc_out.radius = atof(val.c_str()); got_r = true; }
+    else if(key == "label")            { vc_out.label  = val; got_label   = true; }
+    else if(key == "edge_color")       { edge_color    = val; }
+    else if(key == "fill_color")       { fill_color    = val; }
+    else if(key == "fill_transparency"){ fill_transp   = atof(val.c_str()); }
+    else if(key == "active")           { setBooleanOnString(active, val); }
+  }
+
+  if(!active) {
+    auto it = m_view_circles.find(vc_out.label);
+    if(it != m_view_circles.end()) {
+      string uid = "aquaticus-circle-" + sanitizeLabel(vc_out.label);
+      Notify("COT_OUTBOUND",
+             buildDeleteCoT(uid, it->second.lat, it->second.lon));
+      m_delete_cot_sent++;
+      m_view_circles.erase(vc_out.label);
+      debugLog("parseViewCircle: deleted " + vc_out.label);
+    }
+    return false;
+  }
+
+  if(!got_x || !got_y || !got_r || !got_label) return false;
+  if(!m_geodesy.localXYToLatLon(x, y, vc_out.lat, vc_out.lon)) return false;
+
+  vc_out.edge_color_argb = moosColorToArgb(edge_color, 0.0);
+  vc_out.fill_color_argb = moosColorToArgb(fill_color, fill_transp);
+  vc_out.valid = true;
+  return true;
+}
+
+
+// ============================================================
+// buildViewCircleCoT() — circle (u-d-c-c)
+//
+// ATAK renders circles using the ellipse element with equal
+// major/minor radii and angle=360 for a full circle.
+//
+// COLOR ENCODING — two separate systems in one CoT:
+//
+// 1. KML Style block inside <shape><link type="b-x-KmlStyle">:
+//    Colors are ABGR hex strings (KML convention, NOT ARGB):
+//      AABBGGRR — alpha, blue, green, red
+//      "ffffffff" = opaque white in ABGR
+//      "00ffffff" = transparent white in ABGR
+//    This is what actually renders in ATAK's map layer.
+//
+// 2. ATAK native <fillColor value="..."/> in <detail>:
+//    Signed ARGB integer (ATAK convention):
+//      16777215 = 0x00FFFFFF = transparent white
+//      -1       = 0xFFFFFFFF = opaque white
+//    This mirrors the KML fill color for ATAK's internal state.
+//
+// Both must be set consistently for correct rendering.
+//
+// uid format: "aquaticus-circle-{sanitized_label}"
+// Style link uid: same + ".Style" (required by ATAK)
+// ============================================================
+
+string CoTGraphics::buildViewCircleCoT(const ViewCircle& vc)
+{
+  string t_now   = formatCoTTime(m_curr_time, 0.0);
+  string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
+  string uid     = "aquaticus-circle-" + sanitizeLabel(vc.label);
+  string style_uid = uid + ".Style";
+
+  // Convert ARGB integers to KML ABGR hex strings.
+  // ARGB: 0xAARRGGBB → ABGR: 0xAABBGGRR
+  auto argbToKml = [](int argb) -> string {
+    unsigned int u  = (unsigned int)argb;
+    unsigned int aa = (u >> 24) & 0xFF;
+    unsigned int rr = (u >> 16) & 0xFF;
+    unsigned int gg = (u >>  8) & 0xFF;
+    unsigned int bb = (u >>  0) & 0xFF;
+    unsigned int kml = (aa << 24) | (bb << 16) | (gg << 8) | rr;
+    char buf[9];
+    snprintf(buf, sizeof(buf), "%08x", kml);
+    return string(buf);
+  };
+
+  string edge_kml = argbToKml(vc.edge_color_argb);
+  string fill_kml = argbToKml(vc.fill_color_argb);
+  string fill_int = intToString(vc.fill_color_argb);
+  string edge_int = intToString(vc.edge_color_argb);
+  string radius_s = doubleToStringX(vc.radius, 6);
+  string weight_s = doubleToStringX(vc.stroke_weight, 1);
+
+  // KML Style block — controls actual ATAK circle rendering
+  string style_link =
+    "<link uid=\"" + style_uid + "\""
+          " type=\"b-x-KmlStyle\""
+          " relation=\"p-c\">"
+      "<Style>"
+        "<LineStyle>"
+          "<color>" + edge_kml + "</color>"
+          "<width>" + weight_s + "</width>"
+        "</LineStyle>"
+        "<PolyStyle>"
+          "<color>" + fill_kml + "</color>"
+        "</PolyStyle>"
+      "</Style>"
+    "</link>";
+
+  string detail =
+    "<detail>"
+      "<shape>"
+        "<ellipse"
+          " major=\"" + radius_s + "\""
+          " minor=\"" + radius_s + "\""
+          " angle=\"360\"/>"
+        + style_link +
+      "</shape>"
+      "<__shapeExtras cpvis=\"false\"/>"
+      "<contact callsign=\"" + vc.label + "\"/>"
+      "<archive/>"
+      "<remarks/>"
+      "<strokeColor value=\""  + edge_int  + "\"/>"
+      "<strokeWeight value=\"" + weight_s  + "\"/>"
+      "<strokeStyle value=\"solid\"/>"
+      "<fillColor value=\""    + fill_int  + "\"/>"
+    "</detail>";
+
+  return
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<event version=\"2.0\""
+      " uid=\""    + uid    + "\""
+      " type=\"u-d-c-c\""
+      " how=\"h-e\""
+      " time=\""   + t_now  + "\""
+      " start=\""  + t_now  + "\""
+      " stale=\""  + t_stale + "\""
+      " access=\"Undefined\">"
+    "<point"
+      " lat=\"" + doubleToStringX(vc.lat, 7) + "\""
+      " lon=\"" + doubleToStringX(vc.lon, 7) + "\""
+      " hae=\"0.0\" ce=\"9999999\" le=\"9999999\"/>"
+    + detail + "</event>";
+}
+
+
+// ============================================================
 // isLabelBlocked()
 //
 // Returns true if the label should be suppressed.
@@ -1203,6 +1407,7 @@ bool CoTGraphics::buildReport()
          << "  vp="     << m_vp_cot_sent
          << "  vsl="    << m_vsl_cot_sent
          << "  poly="   << m_poly_cot_sent
+         << "  circle=" << m_circle_cot_sent
          << "  flag="   << m_flag_cot_sent
          << "  text="   << m_text_cot_sent
          << "  delete=" << m_delete_cot_sent << endl;
@@ -1227,6 +1432,13 @@ bool CoTGraphics::buildReport()
   for(auto& kv : m_view_polygons)
     m_msgs << " " << kv.first
            << "(" << kv.second.vertices.size() << "pts)";
+  m_msgs << endl;
+
+  m_msgs << "VIEW_CIRCLEs  (" << m_view_circles.size() << ")"
+         << (m_publish_view_circles ? "" : " [disabled]") << ":";
+  for(auto& kv : m_view_circles)
+    m_msgs << " " << kv.first
+           << "(r=" << doubleToStringX(kv.second.radius, 0) << "m)";
   m_msgs << endl;
 
   m_msgs << "Flag markers  (" << m_view_marker_graphics.size() << ")"

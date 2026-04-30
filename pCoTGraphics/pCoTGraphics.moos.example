@@ -34,13 +34,16 @@ ProcessConfig = pCoTGraphics
   // active=false sends a delete CoT to remove the line.
   publish_view_seglists = true
 
-  // ---- VIEW_POLYGON / UTM_ZONE_* → CoT filled polygon (u-d-f) ----
-  // Converts VIEW_POLYGON (uFldFlagManager grab zone circles) and
-  // UTM_ZONE_ONE/TWO (uFldTagManager team zone boundaries) to
-  // closed filled polygons visible on the ATAK map.
-  //   UTM_ZONE_ONE = red team boundary (pink fill)
-  //   UTM_ZONE_TWO = blue team boundary (light blue fill)
+  // ---- VIEW_POLYGON / UTM_ZONE_* → CoT polygon (u-d-f) ----
+  // Polygons are always closed. Filled only when fill_color is
+  // explicit in the source string. UTM_ZONE_* always filled.
   publish_view_polygons = true
+
+  // ---- VIEW_CIRCLE → CoT circle (u-d-c-c) ----
+  // pHelmIvP loiter regions, tag zone radii, custom geometry.
+  // Radius in meters. Edge/fill color from VIEW_CIRCLE string.
+  // Transparent fill by default (outline only).
+  publish_view_circles = true
 
   // ---- FLAG_SUMMARY / VIEW_MARKER → CoT colored flag markers (b-m-p-s-m) ----
   // Converts FLAG_SUMMARY (all flags at startup, '#'-delimited) and
@@ -68,34 +71,6 @@ ProcessConfig = pCoTGraphics
   //                    falls back to NAV flat-earth automatically
   //   true:            always use NAV flat-earth anchor
   use_nav_fallback = false
-
-  // ---- Shoreside mode — vehicle label filtering ----
-  // When shoreside=true, any VIEW_POINT, VIEW_SEGLIST, or VIEW_POLYGON
-  // whose label contains a vehicle name is silently dropped. This
-  // prevents vehicle-specific graphics (loiter regions, recovery
-  // boundaries, waypoint paths) that are bridged to the shore MOOSDB
-  // for pMarineViewer from being forwarded to ATAK.
-  //
-  // vehicle_names receives $(VNAMES) from launch_shoreside.sh via nsplug
-  // (e.g. "red_one:red_two:red_three:blue_one:blue_two:blue_three").
-  // The list is colon-separated and automatically matches the current
-  // team configuration — no manual updates needed when team size changes.
-  //
-  // Leave shoreside=false (default) on vehicle instances — the vehicle
-  // MOOSDB only contains that vehicle's own graphics, so no filtering
-  // is needed.
-  //
-  // shoreside     = true
-  // vehicle_names = $(VNAMES)
-
-  // ---- VIEW_POLYGON fill behavior ----
-  // Polygons are always closed (vertex[0] repeated at end). Whether
-  // they are filled depends on whether fill_color was explicit in the
-  // source VIEW_POLYGON string:
-  //   fill_color present → closed + filled (flag grab zones)
-  //   fill_color absent  → closed outline, no fill
-  //                        (BHV_OpRegionRecover bounds, etc.)
-  // UTM_ZONE_ONE/TWO are always filled (team colors hardcoded).
 
   // ---- Debug output ----
   // false (default): AppCast shows counts and tracked label lists.
