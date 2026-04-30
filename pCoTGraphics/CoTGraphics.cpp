@@ -40,7 +40,8 @@ CoTGraphics::CoTGraphics()
   m_publish_score_label      = true;
   m_immediate_view_points    = true;
   m_stationary_send_interval = 3.0;
-  m_cot_stale_offset         = 86400.0; // 24h — graphics persist across restarts
+  m_cot_stale_offset         = 86400.0;
+  m_shoreside_mode           = false;
   m_debug                    = false;
 
   m_vp_cot_sent     = 0;
@@ -122,6 +123,33 @@ bool CoTGraphics::OnStartUp()
       m_stationary_send_interval = atof(value.c_str());
     else if(param == "use_nav_fallback")
       setBooleanOnString(use_nav_fallback, value);
+    else if(param == "shoreside") {
+      setBooleanOnString(m_shoreside_mode, value);
+      debugLog("Config: shoreside = " + boolToString(m_shoreside_mode));
+    }
+    else if(param == "vehicle_names") {
+      // Colon-separated vehicle name list — matches $(VNAMES) from
+      // launch_shoreside.sh: red_one:red_two:...:blue_one:blue_two:...
+      // Any VIEW_* label containing a vehicle name is blocked when
+      // shoreside=true.
+      string v = orig; biteStringX(v, '=');
+      for(auto& tok : parseString(stripBlankEnds(v), ':')) {
+        string name = stripBlankEnds(tok);
+        if(!name.empty()) m_vehicle_names.insert(name);
+      }
+      debugLog("Config: vehicle_names — " +
+               intToString((int)m_vehicle_names.size()) + " vehicles");
+    }
+    else if(param == "label_block_contains") {
+      // Legacy fallback: comma-separated substring patterns.
+      // Prefer shoreside=true + vehicle_names instead.
+      for(auto& tok : parseString(value, ',')) {
+        string s = stripBlankEnds(tok);
+        if(!s.empty()) m_label_block_contains.push_back(s);
+      }
+      debugLog("Config: label_block_contains — " +
+               intToString((int)m_label_block_contains.size()) + " patterns");
+    }
     else
       handled = false;
 
@@ -162,28 +190,31 @@ void CoTGraphics::registerVariables()
 {
   AppCastingMOOSApp::RegisterVariables();
 
-  // Generic graphics from pHelmIvP
-  Register("VIEW_POINT",   0);
-  Register("VIEW_SEGLIST", 0);
+  // Generic vehicle graphics from pHelmIvP — bridged to shore via pShare.
+  // On the vehicle MOOSDB these are own-vehicle only.
+  // On the shoreside MOOSDB these include all vehicles; use
+  // shoreside=true + vehicle_names to filter vehicle-specific shapes.
+  if(m_publish_view_points)   Register("VIEW_POINT",   0);
+  if(m_publish_view_seglists) Register("VIEW_SEGLIST", 0);
+  if(m_publish_view_polygons) {
+    Register("VIEW_POLYGON",  0);
+    // UTM_ZONE_* are shoreside-only (uFldTagManager).
+    // Don't register on vehicle instances — these variables
+    // don't exist on vehicle MOOSDBs regardless.
+    Register("UTM_ZONE_ONE",  0);
+    Register("UTM_ZONE_TWO",  0);
+  }
 
-  // CTF zone + flag zone polygons
-  // VIEW_POLYGON: uFldFlagManager posts flag grab zone circles
-  // UTM_ZONE_ONE: uFldTagManager red team boundary (pink fill)
-  // UTM_ZONE_TWO: uFldTagManager blue team boundary (light blue)
-  Register("VIEW_POLYGON",  0);
-  Register("UTM_ZONE_ONE",  0);
-  Register("UTM_ZONE_TWO",  0);
+  // Flag markers and score label are shoreside-only variables
+  // (uFldFlagManager, uFldTagManager). Only register when enabled.
+  if(m_publish_flag_markers) {
+    Register("FLAG_SUMMARY", 0);
+    Register("VIEW_MARKER",  0);
+  }
+  if(m_publish_score_label)
+    Register("VIEW_TEXTBOX", 0);
 
-  // CTF flag markers
-  // FLAG_SUMMARY: all flags '#'-delimited, posted at startup
-  // VIEW_MARKER:  single flag update on grab/return
-  Register("FLAG_SUMMARY", 0);
-  Register("VIEW_MARKER",  0);
-
-  // Score label — uFldFlagManager posts at post_score=$(XE) position
-  Register("VIEW_TEXTBOX", 0);
-
-  // Geodesy anchor fallback
+  // Geodesy anchor fallback — always needed
   Register("NODE_REPORT",       0);
   Register("NODE_REPORT_LOCAL", 0);
 }
@@ -234,6 +265,10 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_POINT" && m_publish_view_points) {
       ViewPoint vp;
       if(parseViewPoint(sval, vp)) {
+        if(isLabelBlocked(vp.label)) {
+          debugLog("VIEW_POINT: blocked label=" + vp.label);
+          continue;
+        }
         bool is_new = !m_view_points.count(vp.label);
         if(!is_new) vp.last_sent = m_view_points[vp.label].last_sent;
         m_view_points[vp.label] = vp;
@@ -253,6 +288,10 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_SEGLIST" && m_publish_view_seglists) {
       ViewSegList vsl;
       if(parseViewSegList(sval, vsl)) {
+        if(isLabelBlocked(vsl.label)) {
+          debugLog("VIEW_SEGLIST: blocked label=" + vsl.label);
+          continue;
+        }
         bool is_new = !m_view_seglists.count(vsl.label);
         if(!is_new) vsl.last_sent = m_view_seglists[vsl.label].last_sent;
         m_view_seglists[vsl.label] = vsl;
@@ -264,21 +303,19 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
 
     // --------------------------------------------------------
     // VIEW_POLYGON — closed filled polygon (flag grab zones)
-    //   OR open unfilled polygon (e.g. BHV_OpRegionRecover bounds)
-    //
-    // Whether a polygon is filled is determined by whether
-    // fill_color appears in the raw string. If not present,
-    // the polygon is rendered without fill or closing vertex.
     // --------------------------------------------------------
     else if(key == "VIEW_POLYGON" && m_publish_view_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "")) {
+        if(isLabelBlocked(vp.label)) {
+          debugLog("VIEW_POLYGON: blocked label=" + vp.label);
+          continue;
+        }
         bool is_new = !m_view_polygons.count(vp.label);
         if(!is_new) vp.last_sent = m_view_polygons[vp.label].last_sent;
         m_view_polygons[vp.label] = vp;
         debugLog("VIEW_POLYGON " + string(is_new?"[NEW]":"[UPD]") +
-                 " " + vp.label +
-                 string(vp.filled ? " [filled]" : " [open]"));
+                 " " + vp.label);
       }
     }
 
@@ -601,7 +638,6 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   string fill_color  = "white";
   string edge_color  = "gray50";
   double fill_transp = 0.0;
-  bool   got_fill    = false;   // true only if fill_color was in the raw string
 
   size_t brace_end = raw.find("}");
   string kv_region = (brace_end != string::npos)
@@ -612,7 +648,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
     string key = tolower(biteStringX(t, '='));
     string val = t;
     if     (key == "label")            vp_out.label  = val;
-    else if(key == "fill_color")     { fill_color     = val; got_fill = true; }
+    else if(key == "fill_color")       fill_color     = val;
     else if(key == "edge_color")       edge_color     = val;
     else if(key == "fill_transparency")fill_transp    = atof(val.c_str());
     else if(key == "active")           setBooleanOnString(active, val);
@@ -633,13 +669,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   if(!parsePtsBlock(raw, vp_out.vertices)) return false;
 
   vp_out.fill_color_argb = moosColorToArgb(fill_color, fill_transp);
-  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0);
-
-  // UTM_ZONE_* polygons always use fill (map_key is non-empty for these).
-  // VIEW_POLYGON is filled only if fill_color was explicit in the raw string.
-  // BHV_OpRegionRecover doesn't set fill_color, so its opreg polygons
-  // render as open outlines rather than white-filled rectangles.
-  vp_out.filled = (!map_key.empty()) || got_fill;
+  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0); // edges always opaque
 
   vp_out.valid = true;
   return true;
@@ -807,6 +837,43 @@ int CoTGraphics::moosColorToArgb(const std::string& color_name,
 
 
 // ============================================================
+// isLabelBlocked()
+//
+// Returns true if the label should be suppressed.
+//
+// In shoreside mode (shoreside=true): checks if the label
+// contains any vehicle name from m_vehicle_names. This catches
+// all vehicle-specific graphics regardless of behavior type:
+//   "red_three_loiter_passive" → contains "red_three" → blocked
+//   "blue_one:recover:opreg"   → contains "blue_one"  → blocked
+//
+// Legacy fallback: checks m_label_block_contains patterns.
+// Both checks run if both are configured.
+// ============================================================
+
+bool CoTGraphics::isLabelBlocked(const std::string& label) const
+{
+  // Primary: shoreside mode — block any label containing a vehicle name
+  if(m_shoreside_mode) {
+    for(const auto& vname : m_vehicle_names) {
+      if(label.find(vname) != string::npos) {
+        return true;
+      }
+    }
+  }
+
+  // Legacy: explicit substring patterns
+  for(const auto& pattern : m_label_block_contains) {
+    if(label.find(pattern) != string::npos) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+// ============================================================
 // sanitizeLabel() — spaces and apostrophes → underscores
 // ============================================================
 
@@ -909,16 +976,13 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
 
 
 // ============================================================
-// buildViewPolygonCoT() — closed polygon (u-d-f), filled or unfilled
+// buildViewPolygonCoT() — closed filled polygon (u-d-f)
 //
-// All polygons are closed (vertex[0] repeated at end) so ATAK
-// renders a proper shape boundary regardless of fill.
-//
-// vp.filled=true  (UTM_ZONE_*, VIEW_POLYGON with fill_color):
-//   - <fillColor> element included — colored fill rendered
-//
-// vp.filled=false (BHV_OpRegionRecover opreg bounds, etc.):
-//   - No <fillColor> element — closed outline, no fill
+// Key differences from open polyline:
+//   1. fillColor set from fill_color_argb
+//   2. First vertex repeated at end to close the polygon
+//      (ATAK requires explicit closure for filled shapes)
+//   3. clamped/height/strokeStyle elements from live capture
 // ============================================================
 
 string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
@@ -928,35 +992,25 @@ string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
   string t_now   = formatCoTTime(m_curr_time, 0.0);
   string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
   string uid     = "aquaticus-poly-" + sanitizeLabel(vp.label);
+  string fill    = intToString(vp.fill_color_argb);
   string edge    = intToString(vp.edge_color_argb);
 
-  // Build vertex links
+  // Build vertex links, then close polygon by repeating vertex 0
   string link_xml;
   for(auto& v : vp.vertices)
     link_xml += "<link point=\"" +
       doubleToStringX(v.first, 7) + "," +
       doubleToStringX(v.second, 7) + ",0.0\"/>";
-
-  // Always close the polygon by repeating vertex[0] — ATAK needs
-  // the explicit closure to render a proper shape boundary.
-  // fillColor is only included when vp.filled=true.
+  // Closure vertex — ATAK requires last point == first point for fill
   link_xml += "<link point=\"" +
     doubleToStringX(vp.vertices[0].first, 7) + "," +
     doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
 
-  // <fillColor> only included when polygon is filled.
-  // Omitting it entirely (not setting it to transparent) is what
-  // produces a true outline — matching the unfilled CoT format
-  // confirmed from live ATAK captures.
-  string fill_elem = vp.filled
-    ? "<fillColor value=\"" + intToString(vp.fill_color_argb) + "\"/>"
-    : "";
-
   string detail =
     "<detail>"
       "<contact callsign=\"" + vp.label + "\"/>"
-      "<strokeColor value=\"" + edge + "\"/>"
-    + fill_elem +
+      "<strokeColor value=\"" + edge  + "\"/>"
+      "<fillColor value=\""   + fill  + "\"/>"
       "<strokeWeight value=\"2.0\"/>"
       "<strokeStyle value=\"solid\"/>"
       "<clamped value=\"False\"/>"
@@ -1139,6 +1193,10 @@ bool CoTGraphics::buildReport()
   m_msgs << "Geodesy: " << m_geodesy.getModeString()
          << (m_geodesy_initialized ? " [ready]" : " [NOT READY]")
          << "  debug=" << boolToString(m_debug) << endl;
+  m_msgs << "Mode: " << (m_shoreside_mode ? "SHORESIDE" : "VEHICLE");
+  if(m_shoreside_mode)
+    m_msgs << " — filtering " << m_vehicle_names.size() << " vehicle names";
+  m_msgs << endl;
   m_msgs << endl;
 
   m_msgs << "CoT sent:"

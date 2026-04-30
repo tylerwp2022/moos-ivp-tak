@@ -14,7 +14,8 @@
 /*  Supported conversions:                                  */
 /*    VIEW_POINT       → spot marker     (b-m-p-s-m)        */
 /*    VIEW_SEGLIST     → open polyline   (u-d-f)            */
-/*    VIEW_POLYGON     → filled polygon  (u-d-f + fillColor) */
+/*    VIEW_POLYGON     → closed polygon  (u-d-f); filled    */
+/*                       only if fill_color explicit in src */
 /*    UTM_ZONE_ONE/TWO → filled polygon  (team zone bounds) */
 /*    VIEW_MARKER      → colored flag marker (b-m-p-s-m)   */
 /*    FLAG_SUMMARY     → colored flag markers (b-m-p-s-m)  */
@@ -211,6 +212,10 @@ protected:
   // Sanitize label for use in CoT UID (spaces/apostrophes → _)
   std::string sanitizeLabel(const std::string& label);
 
+  // Returns true if the label matches any entry in m_label_block_contains.
+  // Used to filter vehicle-specific graphics on the shoreside instance.
+  bool isLabelBlocked(const std::string& label) const;
+
 private:
   // --------------------------------------------------------
   // Geodesy
@@ -239,6 +244,30 @@ private:
   bool   m_immediate_view_points;    // send VIEW_POINT on every update
   double m_stationary_send_interval; // seconds between throttled sends
   double m_cot_stale_offset;         // seconds graphics persist in ATAK
+
+  // --------------------------------------------------------
+  // Shoreside mode — vehicle label filtering
+  //
+  // shoreside = true (shoreside plug only):
+  //   Any VIEW_POINT, VIEW_SEGLIST, or VIEW_POLYGON whose label
+  //   contains any vehicle name from vehicle_names is silently
+  //   dropped. This prevents vehicle-specific graphics (loiter
+  //   regions, recovery boundaries, waypoint paths, trackpoints)
+  //   that are bridged to the shore MOOSDB for pMarineViewer from
+  //   being forwarded to ATAK.
+  //
+  // vehicle_names: colon-separated list matching $(VNAMES) from
+  //   launch_shoreside.sh, e.g.:
+  //   red_one:red_two:red_three:blue_one:blue_two:blue_three
+  //
+  // shoreside = false (vehicle plug, default):
+  //   No filtering — vehicle MOOSDB only contains own graphics.
+  // --------------------------------------------------------
+  bool                     m_shoreside_mode;
+  std::set<std::string>    m_vehicle_names;   // parsed from vehicle_names param
+
+  // Legacy pattern-based filter (fallback if vehicle_names not set)
+  std::vector<std::string> m_label_block_contains;
 
   bool   m_debug;
   static const int DEBUG_BUF_SIZE = 12;

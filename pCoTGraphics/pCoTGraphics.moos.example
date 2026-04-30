@@ -69,6 +69,34 @@ ProcessConfig = pCoTGraphics
   //   true:            always use NAV flat-earth anchor
   use_nav_fallback = false
 
+  // ---- Shoreside mode — vehicle label filtering ----
+  // When shoreside=true, any VIEW_POINT, VIEW_SEGLIST, or VIEW_POLYGON
+  // whose label contains a vehicle name is silently dropped. This
+  // prevents vehicle-specific graphics (loiter regions, recovery
+  // boundaries, waypoint paths) that are bridged to the shore MOOSDB
+  // for pMarineViewer from being forwarded to ATAK.
+  //
+  // vehicle_names receives $(VNAMES) from launch_shoreside.sh via nsplug
+  // (e.g. "red_one:red_two:red_three:blue_one:blue_two:blue_three").
+  // The list is colon-separated and automatically matches the current
+  // team configuration — no manual updates needed when team size changes.
+  //
+  // Leave shoreside=false (default) on vehicle instances — the vehicle
+  // MOOSDB only contains that vehicle's own graphics, so no filtering
+  // is needed.
+  //
+  // shoreside     = true
+  // vehicle_names = $(VNAMES)
+
+  // ---- VIEW_POLYGON fill behavior ----
+  // Polygons are always closed (vertex[0] repeated at end). Whether
+  // they are filled depends on whether fill_color was explicit in the
+  // source VIEW_POLYGON string:
+  //   fill_color present → closed + filled (flag grab zones)
+  //   fill_color absent  → closed outline, no fill
+  //                        (BHV_OpRegionRecover bounds, etc.)
+  // UTM_ZONE_ONE/TWO are always filled (team colors hardcoded).
+
   // ---- Debug output ----
   // false (default): AppCast shows counts and tracked label lists.
   // true:            verbose — every VIEW_* parse logged with
