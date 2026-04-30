@@ -638,21 +638,35 @@ bool CoTGraphics::parseViewSegList(const std::string& raw, ViewSegList& vsl_out)
   for(auto& tok : parseString(kv_region, ',')) {
     string t = tok;
     string key = tolower(biteStringX(t, '='));
-    if(key == "label")      vsl_out.label = t;
-    if(key == "edge_color") vsl_out.edge_color_argb = moosColorToArgb(t, 0.0);
-    if(key == "active")     setBooleanOnString(active, t);
+    string val = stripBlankEnds(t);    // strip whitespace from value
+    if(key == "label")      vsl_out.label = val;
+    if(key == "edge_color") vsl_out.edge_color_argb = moosColorToArgb(val, 0.0);
+    if(key == "active")     setBooleanOnString(active, val);
   }
 
   if(!active) {
+    if(vsl_out.label.empty()) return false;
+
+    // Build the UID the same way buildViewSegListCoT does — deterministic
+    // from the label so we can always delete even if pCoTGraphics restarted
+    // and the seglist is no longer in m_view_seglists.
+    string uid = "aquaticus-vsl-" + sanitizeLabel(vsl_out.label);
+
+    // Use stored position if available; ATAK deletes by UID so lat/lon
+    // in the delete CoT only needs to be in the right ballpark.
+    double lat = 0.0, lon = 0.0;
     auto it = m_view_seglists.find(vsl_out.label);
     if(it != m_view_seglists.end()) {
-      string uid = "aquaticus-vsl-" + sanitizeLabel(vsl_out.label);
-      double lat = it->second.vertices.empty() ? 0.0 : it->second.vertices[0].first;
-      double lon = it->second.vertices.empty() ? 0.0 : it->second.vertices[0].second;
-      Notify("COT_OUTBOUND", buildDeleteCoT(uid, lat, lon));
-      m_delete_cot_sent++;
+      if(!it->second.vertices.empty()) {
+        lat = it->second.vertices[0].first;
+        lon = it->second.vertices[0].second;
+      }
       m_view_seglists.erase(vsl_out.label);
     }
+
+    Notify("COT_OUTBOUND", buildDeleteCoT(uid, lat, lon));
+    m_delete_cot_sent++;
+    debugLog("parseViewSegList: delete sent for " + vsl_out.label);
     return false;
   }
 
