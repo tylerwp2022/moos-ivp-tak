@@ -14,24 +14,19 @@
 /*  Supported conversions:                                  */
 /*    VIEW_POINT       → spot marker     (b-m-p-s-m)        */
 /*    VIEW_SEGLIST     → open polyline   (u-d-f)            */
-/*    VIEW_POLYGON     → filled polygon  (u-d-f + fillColor) */
+/*    VIEW_POLYGON     → closed polygon  (u-d-f); filled    */
+/*                       only if fill_color explicit in src */
+/*    VIEW_CIRCLE      → circle          (u-d-c-c)          */
 /*    UTM_ZONE_ONE/TWO → filled polygon  (team zone bounds) */
 /*    VIEW_MARKER      → colored flag marker (b-m-p-s-m)   */
 /*    FLAG_SUMMARY     → colored flag markers (b-m-p-s-m)  */
 /*    VIEW_TEXTBOX     → text label on map (b-m-p-s-m/LABEL)*/
 /*    active=false     → delete event    (t-x-d-d)          */
 /*                                                          */
-/*  CoT 'how' attribute values (matched from live captures):*/
-/*                                                          */
-/*  Flag icon color encoding:                               */
-/*    ARGB is embedded in iconsetpath AND in <color> element*/
-/*    e.g. "COT_MAPPING_SPOTMAP/b-m-p-s-m/-65536" for red  */
-/*         "COT_MAPPING_SPOTMAP/b-m-p-s-m/-16776961" blue  */
-/*    Score label uses "COT_MAPPING_SPOTMAP/b-m-p-s-m/LABEL"*/
-/*                                                          */
 /*  MOOS Interface:                                         */
 /*    Subscribes: VIEW_POINT, VIEW_SEGLIST,                 */
-/*                VIEW_POLYGON, VIEW_MARKER, FLAG_SUMMARY,  */
+/*                VIEW_POLYGON, VIEW_CIRCLE,                */
+/*                VIEW_MARKER, FLAG_SUMMARY,                */
 /*                UTM_ZONE_ONE, UTM_ZONE_TWO,               */
 /*                VIEW_TEXTBOX,                             */
 /*                NODE_REPORT, NODE_REPORT_LOCAL            */
@@ -43,6 +38,7 @@
 
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <utility>
 #include <deque>
@@ -99,6 +95,32 @@ struct ViewPolygon {
                                         // or when hardcoded (UTM_ZONE_*).
   double last_sent       = 0.0;
   bool   valid           = false;
+};
+
+// ============================================================
+// ViewCircle — one VIEW_CIRCLE entry
+//
+// Rendered as a CoT circle (u-d-c-c) using the ellipse element
+// with equal major/minor axes (radius in meters) and angle=360.
+//
+// COLOR ENCODING — two systems in one CoT:
+//   KML Style block: ABGR hex strings (KML convention, not ARGB)
+//   <fillColor value="...">: signed ARGB integer (ATAK native)
+// Both must be set consistently — see buildViewCircleCoT().
+//
+// Default: transparent fill (outline-only circle).
+// Source: VIEW_CIRCLE — pHelmIvP loiter regions, tag zones
+// ============================================================
+struct ViewCircle {
+  std::string label;
+  double lat              = 0.0;
+  double lon              = 0.0;
+  double radius           = 0.0;      // meters
+  int    edge_color_argb  = -1;       // 0xFFFFFFFF opaque white
+  int    fill_color_argb  = 16777215; // 0x00FFFFFF transparent
+  double stroke_weight    = 2.4;
+  double last_sent        = 0.0;
+  bool   valid            = false;
 };
 
 // ============================================================
@@ -178,6 +200,7 @@ protected:
   bool parseViewMarkerGraphic(const std::string& raw, ViewMarkerGraphic& vm_out);
   bool parseFlagSummary(const std::string& raw);
   bool parseViewTextBox(const std::string& raw,       ViewTextBox&       vtb_out);
+  bool parseViewCircle(const std::string& raw,         ViewCircle&        vc_out);
 
   // --------------------------------------------------------
   // CoT builders
@@ -185,6 +208,7 @@ protected:
   std::string buildViewPointCoT(const ViewPoint& vp);
   std::string buildViewSegListCoT(const ViewSegList& vsl);
   std::string buildViewPolygonCoT(const ViewPolygon& vp);
+  std::string buildViewCircleCoT(const ViewCircle& vc);
   std::string buildViewMarkerGraphicCoT(const ViewMarkerGraphic& vm);
   std::string buildViewTextBoxCoT(const ViewTextBox& vtb);
   std::string buildDeleteCoT(const std::string& target_uid,
@@ -211,8 +235,8 @@ protected:
   // Sanitize label for use in CoT UID (spaces/apostrophes → _)
   std::string sanitizeLabel(const std::string& label);
 
-  // Returns true if the label matches any entry in m_label_block_contains.
-  // Used to filter vehicle-specific graphics on the shoreside instance.
+  // Returns true if the label should be dropped (shoreside mode
+  // vehicle-name filter or legacy label_block_contains patterns).
   bool isLabelBlocked(const std::string& label) const;
 
 private:
@@ -228,6 +252,7 @@ private:
   std::map<std::string, ViewPoint>         m_view_points;
   std::map<std::string, ViewSegList>       m_view_seglists;
   std::map<std::string, ViewPolygon>       m_view_polygons;
+  std::map<std::string, ViewCircle>        m_view_circles;
   std::map<std::string, ViewMarkerGraphic> m_view_marker_graphics;
   std::map<std::string, ViewTextBox>       m_view_textboxes;
 
@@ -237,39 +262,27 @@ private:
   bool   m_publish_view_points;
   bool   m_publish_view_seglists;
   bool   m_publish_view_polygons;    // VIEW_POLYGON + UTM_ZONE_*
+  bool   m_publish_view_circles;     // VIEW_CIRCLE
   bool   m_publish_flag_markers;     // FLAG_SUMMARY + VIEW_MARKER
   bool   m_publish_score_label;      // VIEW_TEXTBOX score label
 
   bool   m_immediate_view_points;    // send VIEW_POINT on every update
-  bool   m_immediate_view_seglists;  // send VIEW_SEGLIST on every update
-                                     // set true for vehicle collision avoidance
-                                     // segments that update every pHelmIvP cycle
+  bool   m_immediate_view_seglists;  // send VIEW_SEGLIST on every update;
+                                     // set true on vehicle for avoidance segs
   double m_stationary_send_interval; // seconds between throttled sends
   double m_cot_stale_offset;         // seconds graphics persist in ATAK
 
   // --------------------------------------------------------
   // Shoreside mode — vehicle label filtering
   //
-  // shoreside = true (shoreside plug only):
-  //   Any VIEW_POINT, VIEW_SEGLIST, or VIEW_POLYGON whose label
-  //   contains any vehicle name from vehicle_names is silently
-  //   dropped. This prevents vehicle-specific graphics (loiter
-  //   regions, recovery boundaries, waypoint paths, trackpoints)
-  //   that are bridged to the shore MOOSDB for pMarineViewer from
-  //   being forwarded to ATAK.
-  //
-  // vehicle_names: colon-separated list matching $(VNAMES) from
-  //   launch_shoreside.sh, e.g.:
-  //   red_one:red_two:red_three:blue_one:blue_two:blue_three
-  //
-  // shoreside = false (vehicle plug, default):
-  //   No filtering — vehicle MOOSDB only contains own graphics.
+  // shoreside = true: any VIEW_* label containing a vehicle name
+  //   from vehicle_names is dropped before CoT is built.
+  // vehicle_names: colon-separated list matching $(VNAMES).
+  // shoreside = false (default): no filtering.
   // --------------------------------------------------------
   bool                     m_shoreside_mode;
-  std::set<std::string>    m_vehicle_names;   // parsed from vehicle_names param
-
-  // Legacy pattern-based filter (fallback if vehicle_names not set)
-  std::vector<std::string> m_label_block_contains;
+  std::set<std::string>    m_vehicle_names;
+  std::vector<std::string> m_label_block_contains; // legacy fallback
 
   bool   m_debug;
   static const int DEBUG_BUF_SIZE = 12;
@@ -281,6 +294,7 @@ private:
   unsigned int m_vp_cot_sent;
   unsigned int m_vsl_cot_sent;
   unsigned int m_poly_cot_sent;
+  unsigned int m_circle_cot_sent;
   unsigned int m_flag_cot_sent;
   unsigned int m_text_cot_sent;
   unsigned int m_delete_cot_sent;
