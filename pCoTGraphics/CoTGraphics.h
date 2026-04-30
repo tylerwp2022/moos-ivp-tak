@@ -273,6 +273,11 @@ private:
                                      // set true on vehicle for avoidance segs
   double m_stationary_send_interval; // seconds between throttled sends
   double m_cot_stale_offset;         // seconds graphics persist in ATAK
+  double m_seglist_stale_offset;     // stale override for VIEW_SEGLISTs.
+                                     // Set short (e.g. 8s) on vehicle so
+                                     // avoidance lines auto-expire when
+                                     // pHelmIvP stops publishing them.
+                                     // Default: same as m_cot_stale_offset.
 
   // --------------------------------------------------------
   // Shoreside mode — vehicle label filtering

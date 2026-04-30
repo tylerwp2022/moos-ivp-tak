@@ -44,6 +44,7 @@ CoTGraphics::CoTGraphics()
                                         // set true in vehicle plug
   m_stationary_send_interval = 3.0;
   m_cot_stale_offset         = 86400.0;
+  m_seglist_stale_offset     = -1.0;  // -1 = use m_cot_stale_offset
   m_shoreside_mode           = false;
   m_debug                    = false;
 
@@ -129,6 +130,11 @@ bool CoTGraphics::OnStartUp()
       setBooleanOnString(m_immediate_view_seglists, value);
     else if(param == "stationary_send_interval")
       m_stationary_send_interval = atof(value.c_str());
+    else if(param == "seglist_stale_offset") {
+      m_seglist_stale_offset = atof(value.c_str());
+      debugLog("Config: seglist_stale_offset = " +
+               doubleToStringX(m_seglist_stale_offset, 1) + "s");
+    }
     else if(param == "use_nav_fallback")
       setBooleanOnString(use_nav_fallback, value);
     else if(param == "shoreside") {
@@ -1194,7 +1200,12 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
   if(vsl.vertices.empty()) return "";
 
   string t_now   = formatCoTTime(m_curr_time, 0.0);
-  string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
+  // Use seglist-specific stale if configured; otherwise global stale.
+  // A short stale (e.g. 8s) on vehicle means avoidance lines auto-expire
+  // in ATAK if pHelmIvP stops publishing them — no delete CoT required.
+  double stale_offset = (m_seglist_stale_offset >= 0.0)
+    ? m_seglist_stale_offset : m_cot_stale_offset;
+  string t_stale = formatCoTTime(m_curr_time, stale_offset);
   string uid     = "aquaticus-vsl-" + sanitizeLabel(vsl.label);
   string edge    = intToString(vsl.edge_color_argb);
 
