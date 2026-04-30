@@ -638,8 +638,9 @@ bool CoTGraphics::parseViewSegList(const std::string& raw, ViewSegList& vsl_out)
   for(auto& tok : parseString(kv_region, ',')) {
     string t = tok;
     string key = tolower(biteStringX(t, '='));
-    if(key == "label")  vsl_out.label = t;
-    if(key == "active") setBooleanOnString(active, t);
+    if(key == "label")      vsl_out.label = t;
+    if(key == "edge_color") vsl_out.edge_color_argb = moosColorToArgb(t, 0.0);
+    if(key == "active")     setBooleanOnString(active, t);
   }
 
   if(!active) {
@@ -1149,6 +1150,7 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
   string t_now   = formatCoTTime(m_curr_time, 0.0);
   string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
   string uid     = "aquaticus-vsl-" + sanitizeLabel(vsl.label);
+  string edge    = intToString(vsl.edge_color_argb);
 
   string link_xml;
   for(auto& v : vsl.vertices)
@@ -1159,8 +1161,8 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
   string detail =
     "<detail>"
       "<contact callsign=\"" + vsl.label + "\"/>"
-      "<strokeColor value=\"-1\"/>"
-      "<fillColor value=\"-1\"/>"
+      "<strokeColor value=\"" + edge + "\"/>"
+      "<fillColor value=\""   + edge + "\"/>"
       "<strokeWeight value=\"3.0\"/>"
       "<strokeStyle value=\"solid\"/>"
       "<clamped value=\"False\"/>"

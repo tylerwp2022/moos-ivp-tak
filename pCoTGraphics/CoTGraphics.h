@@ -62,6 +62,8 @@ struct ViewPoint {
 struct ViewSegList {
   std::string label;
   std::vector<std::pair<double,double>> vertices; // (lat, lon)
+  int    edge_color_argb = -1;   // 0xFFFFFFFF opaque white default;
+                                  // set from edge_color= in VIEW_SEGLIST string
   double last_sent = 0.0;
   bool   valid     = false;
 };
