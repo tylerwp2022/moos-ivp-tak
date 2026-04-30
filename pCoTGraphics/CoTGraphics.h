@@ -14,19 +14,24 @@
 /*  Supported conversions:                                  */
 /*    VIEW_POINT       → spot marker     (b-m-p-s-m)        */
 /*    VIEW_SEGLIST     → open polyline   (u-d-f)            */
-/*    VIEW_POLYGON     → closed polygon  (u-d-f); filled    */
-/*                       only if fill_color explicit in src */
-/*    VIEW_CIRCLE      → circle          (u-d-c-c)          */
+/*    VIEW_POLYGON     → filled polygon  (u-d-f + fillColor) */
 /*    UTM_ZONE_ONE/TWO → filled polygon  (team zone bounds) */
 /*    VIEW_MARKER      → colored flag marker (b-m-p-s-m)   */
 /*    FLAG_SUMMARY     → colored flag markers (b-m-p-s-m)  */
 /*    VIEW_TEXTBOX     → text label on map (b-m-p-s-m/LABEL)*/
 /*    active=false     → delete event    (t-x-d-d)          */
 /*                                                          */
+/*  CoT 'how' attribute values (matched from live captures):*/
+/*                                                          */
+/*  Flag icon color encoding:                               */
+/*    ARGB is embedded in iconsetpath AND in <color> element*/
+/*    e.g. "COT_MAPPING_SPOTMAP/b-m-p-s-m/-65536" for red  */
+/*         "COT_MAPPING_SPOTMAP/b-m-p-s-m/-16776961" blue  */
+/*    Score label uses "COT_MAPPING_SPOTMAP/b-m-p-s-m/LABEL"*/
+/*                                                          */
 /*  MOOS Interface:                                         */
 /*    Subscribes: VIEW_POINT, VIEW_SEGLIST,                 */
-/*                VIEW_POLYGON, VIEW_CIRCLE,                */
-/*                VIEW_MARKER, FLAG_SUMMARY,                */
+/*                VIEW_POLYGON, VIEW_MARKER, FLAG_SUMMARY,  */
 /*                UTM_ZONE_ONE, UTM_ZONE_TWO,               */
 /*                VIEW_TEXTBOX,                             */
 /*                NODE_REPORT, NODE_REPORT_LOCAL            */
@@ -97,33 +102,7 @@ struct ViewPolygon {
 };
 
 // ============================================================
-// ViewCircle — one VIEW_CIRCLE entry
-//
-// Rendered as a CoT circle (u-d-c-c) in ATAK using the ellipse
-// element with equal major/minor axes. The Style block uses KML
-// color format (ABGR hex) while the detail <fillColor> element
-// uses a signed ARGB integer — both must be set consistently.
-//
-// Radius is in meters (same units as MOOS local XY coordinates).
-// Center position is converted from local XY to lat/lon via geodesy.
-//
-// fill_color_argb=0x00FFFFFF (16777215) → fully transparent fill
-// (no fill, outline only) — same convention as the ATAK example.
-//
-// Source: VIEW_CIRCLE — pHelmIvP loiter regions (circles),
-//         tag zone radii, custom geometry
-// ============================================================
-struct ViewCircle {
-  std::string label;
-  double lat              = 0.0;
-  double lon              = 0.0;
-  double radius           = 0.0;   // meters
-  int    edge_color_argb  = -1;    // 0xFFFFFFFF opaque white
-  int    fill_color_argb  = 16777215; // 0x00FFFFFF transparent
-  double stroke_weight    = 2.4;
-  double last_sent        = 0.0;
-  bool   valid            = false;
-};
+// ViewMarkerGraphic — one VIEW_MARKER or FLAG_SUMMARY entry
 //
 // Rendered as a colored b-m-p-s-m spot marker in ATAK.
 // The ARGB integer is embedded in BOTH the <color> element
@@ -199,7 +178,6 @@ protected:
   bool parseViewMarkerGraphic(const std::string& raw, ViewMarkerGraphic& vm_out);
   bool parseFlagSummary(const std::string& raw);
   bool parseViewTextBox(const std::string& raw,       ViewTextBox&       vtb_out);
-  bool parseViewCircle(const std::string& raw,         ViewCircle&        vc_out);
 
   // --------------------------------------------------------
   // CoT builders
@@ -207,7 +185,6 @@ protected:
   std::string buildViewPointCoT(const ViewPoint& vp);
   std::string buildViewSegListCoT(const ViewSegList& vsl);
   std::string buildViewPolygonCoT(const ViewPolygon& vp);
-  std::string buildViewCircleCoT(const ViewCircle& vc);
   std::string buildViewMarkerGraphicCoT(const ViewMarkerGraphic& vm);
   std::string buildViewTextBoxCoT(const ViewTextBox& vtb);
   std::string buildDeleteCoT(const std::string& target_uid,
@@ -251,7 +228,6 @@ private:
   std::map<std::string, ViewPoint>         m_view_points;
   std::map<std::string, ViewSegList>       m_view_seglists;
   std::map<std::string, ViewPolygon>       m_view_polygons;
-  std::map<std::string, ViewCircle>        m_view_circles;
   std::map<std::string, ViewMarkerGraphic> m_view_marker_graphics;
   std::map<std::string, ViewTextBox>       m_view_textboxes;
 
@@ -261,11 +237,13 @@ private:
   bool   m_publish_view_points;
   bool   m_publish_view_seglists;
   bool   m_publish_view_polygons;    // VIEW_POLYGON + UTM_ZONE_*
-  bool   m_publish_view_circles;     // VIEW_CIRCLE
   bool   m_publish_flag_markers;     // FLAG_SUMMARY + VIEW_MARKER
   bool   m_publish_score_label;      // VIEW_TEXTBOX score label
 
   bool   m_immediate_view_points;    // send VIEW_POINT on every update
+  bool   m_immediate_view_seglists;  // send VIEW_SEGLIST on every update
+                                     // set true for vehicle collision avoidance
+                                     // segments that update every pHelmIvP cycle
   double m_stationary_send_interval; // seconds between throttled sends
   double m_cot_stale_offset;         // seconds graphics persist in ATAK
 
@@ -303,7 +281,6 @@ private:
   unsigned int m_vp_cot_sent;
   unsigned int m_vsl_cot_sent;
   unsigned int m_poly_cot_sent;
-  unsigned int m_circle_cot_sent;
   unsigned int m_flag_cot_sent;
   unsigned int m_text_cot_sent;
   unsigned int m_delete_cot_sent;

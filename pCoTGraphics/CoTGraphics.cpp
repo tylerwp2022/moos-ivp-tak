@@ -40,6 +40,8 @@ CoTGraphics::CoTGraphics()
   m_publish_flag_markers     = true;
   m_publish_score_label      = true;
   m_immediate_view_points    = true;
+  m_immediate_view_seglists  = false;  // false default — throttled for shoreside
+                                        // set true in vehicle plug
   m_stationary_send_interval = 3.0;
   m_cot_stale_offset         = 86400.0;
   m_shoreside_mode           = false;
@@ -123,6 +125,8 @@ bool CoTGraphics::OnStartUp()
       setBooleanOnString(m_publish_score_label, value);
     else if(param == "immediate_view_points")
       setBooleanOnString(m_immediate_view_points, value);
+    else if(param == "immediate_view_seglists")
+      setBooleanOnString(m_immediate_view_seglists, value);
     else if(param == "stationary_send_interval")
       m_stationary_send_interval = atof(value.c_str());
     else if(param == "use_nav_fallback")
@@ -300,6 +304,11 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
         debugLog("VIEW_SEGLIST " + string(is_new?"[NEW]":"[UPD]") +
                  " " + vsl.label +
                  " (" + intToString((int)vsl.vertices.size()) + " pts)");
+        if(m_immediate_view_seglists) {
+          Notify("COT_OUTBOUND", buildViewSegListCoT(m_view_seglists[vsl.label]));
+          m_view_seglists[vsl.label].last_sent = m_curr_time;
+          m_vsl_cot_sent++;
+        }
       }
     }
 
@@ -456,8 +465,8 @@ bool CoTGraphics::Iterate()
     }
   }
 
-  // Throttled VIEW_SEGLISTs
-  if(m_publish_view_seglists) {
+  // Throttled VIEW_SEGLISTs (when immediate_view_seglists = false)
+  if(m_publish_view_seglists && !m_immediate_view_seglists) {
     for(auto& kv : m_view_seglists) {
       ViewSegList& vsl = kv.second;
       if(!vsl.valid) continue;
