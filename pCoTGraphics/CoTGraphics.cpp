@@ -1238,13 +1238,13 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
 
 
 // ============================================================
-// buildViewPolygonCoT() — closed filled polygon (u-d-f)
+// ============================================================
+// buildViewPolygonCoT() — closed polygon (u-d-f), filled or outline
 //
-// Key differences from open polyline:
-//   1. fillColor set from fill_color_argb
-//   2. First vertex repeated at end to close the polygon
-//      (ATAK requires explicit closure for filled shapes)
-//   3. clamped/height/strokeStyle elements from live capture
+// All polygons are closed (vertex[0] repeated). Whether a fill
+// color is included depends on vp.filled:
+//   vp.filled=true  → <fillColor> included, polygon renders filled
+//   vp.filled=false → <fillColor> omitted,  polygon renders as outline
 // ============================================================
 
 string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
@@ -1254,25 +1254,29 @@ string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
   string t_now   = formatCoTTime(m_curr_time, 0.0);
   string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
   string uid     = "aquaticus-poly-" + sanitizeLabel(vp.label);
-  string fill    = intToString(vp.fill_color_argb);
   string edge    = intToString(vp.edge_color_argb);
 
-  // Build vertex links, then close polygon by repeating vertex 0
+  // All polygons are closed — repeat vertex 0 at end
   string link_xml;
   for(auto& v : vp.vertices)
     link_xml += "<link point=\"" +
       doubleToStringX(v.first, 7) + "," +
       doubleToStringX(v.second, 7) + ",0.0\"/>";
-  // Closure vertex — ATAK requires last point == first point for fill
   link_xml += "<link point=\"" +
     doubleToStringX(vp.vertices[0].first, 7) + "," +
     doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
 
+  // <fillColor> only included when vp.filled=true.
+  // Omitting it entirely produces a closed outline in ATAK.
+  string fill_elem = vp.filled
+    ? "<fillColor value=\"" + intToString(vp.fill_color_argb) + "\"/>"
+    : "";
+
   string detail =
     "<detail>"
       "<contact callsign=\"" + vp.label + "\"/>"
-      "<strokeColor value=\"" + edge  + "\"/>"
-      "<fillColor value=\""   + fill  + "\"/>"
+      "<strokeColor value=\"" + edge + "\"/>"
+    + fill_elem +
       "<strokeWeight value=\"2.0\"/>"
       "<strokeStyle value=\"solid\"/>"
       "<clamped value=\"False\"/>"
