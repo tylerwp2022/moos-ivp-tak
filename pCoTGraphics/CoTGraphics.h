@@ -284,7 +284,13 @@ private:
   // --------------------------------------------------------
   bool                     m_shoreside_mode;
   std::set<std::string>    m_vehicle_names;
-  std::vector<std::string> m_label_block_contains; // legacy fallback
+  std::vector<std::string> m_label_block_contains;    // legacy fallback
+
+  // Polygons whose label contains any of these substrings are forced
+  // to unfilled (closed outline only) regardless of fill_color in the
+  // source string. Use in vehicle plug for opreg bounds:
+  //   label_force_unfilled_contains = opreg
+  std::vector<std::string> m_label_force_unfilled_contains;
 
   bool   m_debug;
   static const int DEBUG_BUF_SIZE = 12;

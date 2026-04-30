@@ -158,6 +158,18 @@ bool CoTGraphics::OnStartUp()
       debugLog("Config: label_block_contains — " +
                intToString((int)m_label_block_contains.size()) + " patterns");
     }
+    else if(param == "label_force_unfilled_contains") {
+      // Polygons whose label contains any of these substrings are
+      // forced to closed-outline-only (no fill) regardless of
+      // fill_color in the source VIEW_POLYGON string.
+      // Example: label_force_unfilled_contains = opreg
+      for(auto& tok : parseString(value, ',')) {
+        string s = stripBlankEnds(tok);
+        if(!s.empty()) m_label_force_unfilled_contains.push_back(s);
+      }
+      debugLog("Config: label_force_unfilled_contains — " +
+               intToString((int)m_label_force_unfilled_contains.size()) + " patterns");
+    }
     else
       handled = false;
 
@@ -700,6 +712,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   string fill_color  = "white";
   string edge_color  = "gray50";
   double fill_transp = 0.0;
+  bool   got_fill    = false;  // true only if fill_color was explicit in string
 
   size_t brace_end = raw.find("}");
   string kv_region = (brace_end != string::npos)
@@ -710,7 +723,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
     string key = tolower(biteStringX(t, '='));
     string val = t;
     if     (key == "label")            vp_out.label  = val;
-    else if(key == "fill_color")       fill_color     = val;
+    else if(key == "fill_color")     { fill_color     = val; got_fill = true; }
     else if(key == "edge_color")       edge_color     = val;
     else if(key == "fill_transparency")fill_transp    = atof(val.c_str());
     else if(key == "active")           setBooleanOnString(active, val);
@@ -731,7 +744,26 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   if(!parsePtsBlock(raw, vp_out.vertices)) return false;
 
   vp_out.fill_color_argb = moosColorToArgb(fill_color, fill_transp);
-  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0); // edges always opaque
+  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0);
+
+  // UTM_ZONE_* (map_key non-empty) always filled; VIEW_POLYGON filled
+  // only if fill_color was explicitly present in the raw string.
+  vp_out.filled = (!map_key.empty()) || got_fill;
+
+  // Force-unfill: override filled=true for labels matching
+  // label_force_unfilled_contains patterns. Used in vehicle plug
+  // to keep opreg bounds as outlines even when BHV_OpRegionRecover
+  // explicitly sets fill_color in its VIEW_POLYGON string.
+  if(vp_out.filled) {
+    for(const auto& pat : m_label_force_unfilled_contains) {
+      if(vp_out.label.find(pat) != string::npos) {
+        vp_out.filled = false;
+        debugLog("parseViewPolygon: force-unfilled " + vp_out.label +
+                 " (matches '" + pat + "')");
+        break;
+      }
+    }
+  }
 
   vp_out.valid = true;
   return true;
