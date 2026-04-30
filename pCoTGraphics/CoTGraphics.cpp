@@ -264,26 +264,21 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
 
     // --------------------------------------------------------
     // VIEW_POLYGON — closed filled polygon (flag grab zones)
+    //   OR open unfilled polygon (e.g. BHV_OpRegionRecover bounds)
     //
-    // Filtered: labels containing "opreg" are silently dropped.
-    // BHV_OpRegionRecover publishes the full field boundary as a
-    // VIEW_POLYGON with label "<vehicle>:recover:opreg" for every
-    // deployed vehicle. These cover the entire field with a solid
-    // white fill and are useful in pMarineViewer but serve no
-    // purpose in ATAK — they would obscure the team zone overlays.
+    // Whether a polygon is filled is determined by whether
+    // fill_color appears in the raw string. If not present,
+    // the polygon is rendered without fill or closing vertex.
     // --------------------------------------------------------
     else if(key == "VIEW_POLYGON" && m_publish_view_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "")) {
-        if(vp.label.find("opreg") != string::npos) {
-          debugLog("VIEW_POLYGON: skipping opreg polygon " + vp.label);
-          continue;
-        }
         bool is_new = !m_view_polygons.count(vp.label);
         if(!is_new) vp.last_sent = m_view_polygons[vp.label].last_sent;
         m_view_polygons[vp.label] = vp;
         debugLog("VIEW_POLYGON " + string(is_new?"[NEW]":"[UPD]") +
-                 " " + vp.label);
+                 " " + vp.label +
+                 string(vp.filled ? " [filled]" : " [open]"));
       }
     }
 
@@ -606,6 +601,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   string fill_color  = "white";
   string edge_color  = "gray50";
   double fill_transp = 0.0;
+  bool   got_fill    = false;   // true only if fill_color was in the raw string
 
   size_t brace_end = raw.find("}");
   string kv_region = (brace_end != string::npos)
@@ -616,7 +612,7 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
     string key = tolower(biteStringX(t, '='));
     string val = t;
     if     (key == "label")            vp_out.label  = val;
-    else if(key == "fill_color")       fill_color     = val;
+    else if(key == "fill_color")     { fill_color     = val; got_fill = true; }
     else if(key == "edge_color")       edge_color     = val;
     else if(key == "fill_transparency")fill_transp    = atof(val.c_str());
     else if(key == "active")           setBooleanOnString(active, val);
@@ -637,7 +633,13 @@ bool CoTGraphics::parseViewPolygon(const std::string& raw,
   if(!parsePtsBlock(raw, vp_out.vertices)) return false;
 
   vp_out.fill_color_argb = moosColorToArgb(fill_color, fill_transp);
-  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0); // edges always opaque
+  vp_out.edge_color_argb = moosColorToArgb(edge_color, 0.0);
+
+  // UTM_ZONE_* polygons always use fill (map_key is non-empty for these).
+  // VIEW_POLYGON is filled only if fill_color was explicit in the raw string.
+  // BHV_OpRegionRecover doesn't set fill_color, so its opreg polygons
+  // render as open outlines rather than white-filled rectangles.
+  vp_out.filled = (!map_key.empty()) || got_fill;
 
   vp_out.valid = true;
   return true;
@@ -907,13 +909,16 @@ string CoTGraphics::buildViewSegListCoT(const ViewSegList& vsl)
 
 
 // ============================================================
-// buildViewPolygonCoT() — closed filled polygon (u-d-f)
+// buildViewPolygonCoT() — polygon (u-d-f), filled or open
 //
-// Key differences from open polyline:
-//   1. fillColor set from fill_color_argb
-//   2. First vertex repeated at end to close the polygon
-//      (ATAK requires explicit closure for filled shapes)
-//   3. clamped/height/strokeStyle elements from live capture
+// vp.filled=true  (UTM_ZONE_*, VIEW_POLYGON with fill_color):
+//   - <fillColor> element included
+//   - vertex[0] repeated at end to close the shape
+//   (ATAK requires explicit closure for filled polygons)
+//
+// vp.filled=false (BHV_OpRegionRecover opreg bounds, etc.):
+//   - No <fillColor> element — outline only
+//   - No closing vertex — open polyline
 // ============================================================
 
 string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
@@ -923,25 +928,35 @@ string CoTGraphics::buildViewPolygonCoT(const ViewPolygon& vp)
   string t_now   = formatCoTTime(m_curr_time, 0.0);
   string t_stale = formatCoTTime(m_curr_time, m_cot_stale_offset);
   string uid     = "aquaticus-poly-" + sanitizeLabel(vp.label);
-  string fill    = intToString(vp.fill_color_argb);
   string edge    = intToString(vp.edge_color_argb);
 
-  // Build vertex links, then close polygon by repeating vertex 0
+  // Build vertex links
   string link_xml;
   for(auto& v : vp.vertices)
     link_xml += "<link point=\"" +
       doubleToStringX(v.first, 7) + "," +
       doubleToStringX(v.second, 7) + ",0.0\"/>";
-  // Closure vertex — ATAK requires last point == first point for fill
-  link_xml += "<link point=\"" +
-    doubleToStringX(vp.vertices[0].first, 7) + "," +
-    doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
+
+  // Filled polygons need vertex[0] repeated to close the shape.
+  // Open polygons omit it — ATAK renders them as outlines only.
+  if(vp.filled)
+    link_xml += "<link point=\"" +
+      doubleToStringX(vp.vertices[0].first, 7) + "," +
+      doubleToStringX(vp.vertices[0].second, 7) + ",0.0\"/>";
+
+  // <fillColor> only included when polygon is filled.
+  // Omitting it entirely (not setting it to transparent) is what
+  // produces a true outline — matching the unfilled CoT format
+  // confirmed from live ATAK captures.
+  string fill_elem = vp.filled
+    ? "<fillColor value=\"" + intToString(vp.fill_color_argb) + "\"/>"
+    : "";
 
   string detail =
     "<detail>"
       "<contact callsign=\"" + vp.label + "\"/>"
-      "<strokeColor value=\"" + edge  + "\"/>"
-      "<fillColor value=\""   + fill  + "\"/>"
+      "<strokeColor value=\"" + edge + "\"/>"
+    + fill_elem +
       "<strokeWeight value=\"2.0\"/>"
       "<strokeStyle value=\"solid\"/>"
       "<clamped value=\"False\"/>"
