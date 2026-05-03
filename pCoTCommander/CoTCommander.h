@@ -100,6 +100,9 @@
 /*                NODE_REPORT_LOCAL                         */
 /*                ATAK_WPT_REACHED (waypt endflag)          */
 /*                DEPLOY          (deployment state)        */
+/*                ATAK_MODE       (vehicle mode only —      */
+/*                  warns operator when attack/defend sent  */
+/*                  while game behaviors are suppressed)    */
 /*    Publishes:  ATAK_MODE     (bool string)               */
 /*                ATAK_WAYPT_ACTIVE (bool string)            */
 /*                ATAK_WPT_UPDATE (BHV_Waypoint update str) */
@@ -243,6 +246,14 @@ private:
   // Deployment state — tracked from DEPLOY MOOS variable.
   // Waypoints are rejected if the robot is not deployed.
   bool        m_deployed;
+
+  // Tracks the ATAK_MODE variable published on this vehicle's MOOSDB.
+  // Only subscribed and tracked in vehicle mode (fleet_mode=false) —
+  // the shore MOOSDB never holds a bare ATAK_MODE variable.
+  // Used to warn the operator when attack/defend commands are sent
+  // while the vehicle is in ATAK mode (game behaviors are suppressed,
+  // so the ACTION post would have no visible effect until resume).
+  bool        m_atak_mode;
 
   // Guards against repeated "Waypoint reached" messages.
   // Set true after the first reached notification for a given

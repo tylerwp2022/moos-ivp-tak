@@ -41,6 +41,7 @@ CoTCommander::CoTCommander()
   m_last_wpt_lat         = 0.0;
   m_last_wpt_lon         = 0.0;
   m_deployed             = false;
+  m_atak_mode            = false;
   m_wpt_reached_sent     = false;
 }
 
@@ -226,6 +227,13 @@ void CoTCommander::registerVariables()
 
   // Track deployment state — waypoints rejected if not deployed
   Register("DEPLOY", 0);
+
+  // Track ATAK mode state in vehicle mode only. Used to warn the
+  // operator when attack/defend commands are sent while game behaviors
+  // are suppressed (ATAK_MODE=true). Not registered in fleet mode
+  // because the shore MOOSDB never holds a bare ATAK_MODE variable.
+  if(!m_fleet_mode)
+    Register("ATAK_MODE", 0);
 }
 
 
@@ -309,6 +317,18 @@ bool CoTCommander::OnNewMail(MOOSMSG_LIST &NewMail)
       setBooleanOnString(m_deployed, sval);
       if(m_deployed != prev)
         debugLog("OnNewMail: DEPLOY = " + boolToString(m_deployed));
+    }
+
+    // --------------------------------------------------------
+    // ATAK_MODE — track operator control state (vehicle mode).
+    // Used to warn when attack/defend commands are sent while
+    // game behaviors are suppressed.
+    // --------------------------------------------------------
+    else if(key == "ATAK_MODE") {
+      bool prev = m_atak_mode;
+      setBooleanOnString(m_atak_mode, sval);
+      if(m_atak_mode != prev)
+        debugLog("OnNewMail: ATAK_MODE = " + boolToString(m_atak_mode));
     }
 
     else if(key == "ATAK_WPT_REACHED" && sval == "true") {
@@ -438,7 +458,13 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
   // ---- b-m-p-w-GOTO — ATAK "Go To" waypoint ----
   if(m_enable_waypoint_control && type == "b-m-p-w-GOTO") {
     if(lat_str.empty() || lon_str.empty()) {
-      debugLog("dispatchInboundCoT: b-m-p-w-GOTO missing lat/lon — skipping");
+      // Malformed GoTo — no coordinates. Extract sender for DM.
+      string sender    = extractAttr(xml, "parent_callsign");
+      string chat_dest = sender.empty() ? "All Chat Rooms" : sender;
+      Notify("ATAK_CHAT_OUT",
+             "message=Waypoint rejected -- missing coordinates in GoTo command."
+             "|chatroom=" + chat_dest);
+      debugLog("dispatchInboundCoT: b-m-p-w-GOTO missing lat/lon -- skipping");
       return false;
     }
     handleWaypointCoT(uid, lat, lon, xml);
@@ -486,48 +512,55 @@ void CoTCommander::handleWaypointCoT(const std::string& uid,
                                       const std::string& xml)
 {
   // --------------------------------------------------------
-  // Reject waypoint if robot is not deployed.
-  // The operator must press Deploy in pMarineViewer first.
+  // Extract sender callsign early so ALL rejection paths below
+  // can DM a reason back to the operator, not just the happy path.
+  // <link uid="ANDROID-abc" parent_callsign="Tyler" .../>
+  // Falls back to "All Chat Rooms" if the element is absent.
+  // --------------------------------------------------------
+  string sender    = extractAttr(xml, "parent_callsign");
+  string chat_dest = sender.empty() ? "All Chat Rooms" : sender;
+
+  // --------------------------------------------------------
+  // GUARD: reject if not deployed.
   // --------------------------------------------------------
   if(!m_deployed) {
-    string sender    = extractAttr(xml, "parent_callsign");
-    string chat_dest = sender.empty() ? "All Chat Rooms" : sender;
     Notify("ATAK_CHAT_OUT",
-           "message=Deploy robots before sending waypoints.|chatroom=" +
-           chat_dest);
-    reportEvent("pCoTCommander: waypoint rejected — not deployed");
-    debugLog("handleWaypointCoT: rejected — DEPLOY=false");
+           "message=Waypoint rejected -- not deployed. "
+           "Send 'deploy' first."
+           "|chatroom=" + chat_dest);
+    reportEvent("pCoTCommander: waypoint rejected -- not deployed");
+    debugLog("handleWaypointCoT: rejected -- DEPLOY=false");
     return;
   }
 
+  // --------------------------------------------------------
+  // GUARD: reject if geodesy not ready.
+  // Geodesy is ready once LatOrigin/LongOrigin are found in the
+  // mission file OR a NODE_REPORT with X/Y/LAT/LON has arrived.
+  // This failure means the vehicle hasn't acquired GPS yet.
+  // --------------------------------------------------------
   double x = 0.0, y = 0.0;
+  if(!m_geodesy.latLonToLocalXY(lat, lon, x, y)) {
+    Notify("ATAK_CHAT_OUT",
+           "message=Waypoint rejected -- coordinate system not ready. "
+           "Waiting for GPS fix."
+           "|chatroom=" + chat_dest);
+    reportRunWarning("pCoTCommander: waypoint received but geodesy not ready "
+                     "-- cannot convert lat/lon to local XY. "
+                     "Waiting for NODE_REPORT to establish NAV anchor.");
+    debugLog("handleWaypointCoT: FAILED -- geodesy not ready");
+    return;
+  }
 
-  // New waypoint — reset the reached guard so the next capture
+  // New waypoint -- reset the reached guard so the next capture
   // triggers a fresh "waypoint reached" notification.
   m_wpt_reached_sent = false;
 
-  if(!m_geodesy.latLonToLocalXY(lat, lon, x, y)) {
-    reportRunWarning("pCoTCommander: waypoint received but geodesy not ready "
-                     "— cannot convert lat/lon to local XY. "
-                     "Waiting for NODE_REPORT to establish NAV anchor.");
-    debugLog("handleWaypointCoT: FAILED — geodesy not ready");
-    return;
-  }
-
-  // --------------------------------------------------------
-  // Extract sender callsign from the <link parent_callsign>
-  // element in the waypoint CoT. Used for the acknowledgment
-  // DM back to the operator.
-  //
-  // Example CoT: <link uid="ANDROID-abc" parent_callsign="Tyler" .../>
-  // --------------------------------------------------------
-  string sender = extractAttr(xml, "parent_callsign");
+  // Store sender and position for AppCast and next acknowledgment
   if(!sender.empty()) {
     m_last_sender_callsign = sender;
-    debugLog("handleWaypointCoT: sender callsign = " + sender);
+    debugLog("handleWaypointCoT: sender = " + sender);
   }
-
-  // Store lat/lon for the acknowledgment message
   m_last_wpt_lat = lat;
   m_last_wpt_lon = lon;
 
@@ -535,37 +568,35 @@ void CoTCommander::handleWaypointCoT(const std::string& uid,
                 + ","                   + doubleToStringX(y, 2)
                 + " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
 
-  // ATAK_MODE=true  — vehicle enters operator control; game behaviors yield.
-  // ATAK_WAYPT_ACTIVE=true — activates the waypt_atak behavior in pHelmIvP.
-  // Both are posted together so the behavior fires immediately on this tick.
-
-  Notify("ATAK_MODE",         string("true"));
-  Notify("ATAK_WAYPT_ACTIVE", string("true"));
+  // ATAK_MODE=true  -- vehicle enters operator control; game behaviors yield.
+  // ATAK_WAYPT_ACTIVE=true -- activates the waypt_atak behavior in pHelmIvP.
+  // Both posted together so the behavior fires on this MOOSDB tick.
+  Notify("ATAK_MODE",           string("true"));
+  Notify("ATAK_WAYPT_ACTIVE",   string("true"));
   Notify(m_waypoint_update_var, update);
   m_waypoint_commands++;
 
   // --------------------------------------------------------
-  // Send acknowledgment chat back to the operator.
-  // DM to whoever sent the waypoint (from parent_callsign).
-  // Falls back to All Chat Rooms if sender unknown.
+  // Confirmation DM to operator.
+  // Format: "ATAK mode active. Moving to lat, lon."
+  // Mentioning "ATAK mode active" confirms game behaviors have
+  // yielded -- useful if the operator wasn't sure of the state.
   // --------------------------------------------------------
-  string chat_dest = sender.empty() ? "All Chat Rooms" : sender;
-
-  // Format lat/lon to 5 decimal places — enough for ~1m precision
-  string lat_str = doubleToStringX(lat, 5);
+  string lat_str = doubleToStringX(lat, 5);  // ~1m precision
   string lon_str = doubleToStringX(lon, 5);
 
   Notify("ATAK_CHAT_OUT",
-         "message=Waypoint received. Moving to " +
-         lat_str + ", " + lon_str + ".|chatroom=" + chat_dest);
+         "message=ATAK mode active. Moving to " +
+         lat_str + ", " + lon_str + "."
+         "|chatroom=" + chat_dest);
 
   m_last_command = "GOTO lat=" + doubleToStringX(lat, 6) +
                    " lon=" + doubleToStringX(lon, 6) +
-                   " → x=" + doubleToStringX(x, 2) +
+                   " x=" + doubleToStringX(x, 2) +
                    " y=" + doubleToStringX(y, 2) +
                    " sender=" + chat_dest;
 
-  string event_msg = "pCoTCommander: waypoint → " +
+  string event_msg = "pCoTCommander: waypoint -> " +
                      m_waypoint_update_var + "=" + update +
                      " sender=" + chat_dest +
                      " (uid=" + uid + ")";
@@ -583,6 +614,12 @@ bool CoTCommander::buildReport()
   m_msgs << "Geodesy: " << m_geodesy.getModeString()
          << (m_geodesy_initialized ? " [ready]" : " [NOT READY]")
          << "  debug=" << boolToString(m_debug) << endl;
+  m_msgs << endl;
+
+  m_msgs << "State:   deployed=" << boolToString(m_deployed);
+  if(!m_fleet_mode)
+    m_msgs << "  atak_mode=" << boolToString(m_atak_mode);
+  m_msgs << endl;
   m_msgs << endl;
 
   m_msgs << "COT_INBOUND: received=" << m_cot_received
@@ -938,6 +975,20 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       Notify("ATAK_CHAT_OUT", help + "|chatroom=" + reply_to);
       debugLog("handleChatCommand: unrecognized cmd=" + cmd);
       return;
+    }
+
+    // --------------------------------------------------------
+    // Warn if in vehicle mode and ATAK_MODE is active.
+    // The ACTION variable is posted, but game behaviors condition
+    // on ATAK_MODE!=true and are currently suppressed — the role
+    // change will have no visible effect until "resume" is sent.
+    // --------------------------------------------------------
+    if(!m_fleet_mode && m_atak_mode) {
+      Notify("ATAK_CHAT_OUT",
+             "message=Warning: vehicle is in ATAK mode -- game behaviors "
+             "are suppressed. Role set to " + action_val + " but will not "
+             "take effect until you send 'resume'."
+             "|chatroom=" + reply_to);
     }
 
     string var_name = "ACTION" + sfx;  // ACTION_ALL, ACTION_BLUE_ONE, or ACTION
