@@ -237,9 +237,10 @@ protected:
   // Sanitize label for use in CoT UID (spaces/apostrophes → _)
   std::string sanitizeLabel(const std::string& label);
 
-  // Returns true if the label should be dropped (shoreside mode
-  // vehicle-name filter or legacy label_block_contains patterns).
-  bool isLabelBlocked(const std::string& label) const;
+  // Returns true if the label should be dropped.
+  // shape_type exempts VIEW_CIRCLE from the vehicle_names filter.
+  bool isLabelBlocked(const std::string& label,
+                      const std::string& shape_type) const;
 
 private:
   // --------------------------------------------------------

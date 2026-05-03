@@ -289,7 +289,7 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_POINT" && m_publish_view_points) {
       ViewPoint vp;
       if(parseViewPoint(sval, vp)) {
-        if(isLabelBlocked(vp.label)) {
+        if(isLabelBlocked(vp.label, "VIEW_POINT")) {
           debugLog("VIEW_POINT: blocked label=" + vp.label);
           continue;
         }
@@ -312,7 +312,7 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_SEGLIST" && m_publish_view_seglists) {
       ViewSegList vsl;
       if(parseViewSegList(sval, vsl)) {
-        if(isLabelBlocked(vsl.label)) {
+        if(isLabelBlocked(vsl.label, "VIEW_SEGLIST")) {
           debugLog("VIEW_SEGLIST: blocked label=" + vsl.label);
           continue;
         }
@@ -336,8 +336,7 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_POLYGON" && m_publish_view_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "")) {
-        if(isLabelBlocked(vp.label)) {
-          debugLog("VIEW_POLYGON: blocked label=" + vp.label);
+        if(isLabelBlocked(vp.label, "VIEW_POLYGON")) {
           continue;
         }
         bool is_new = !m_view_polygons.count(vp.label);
@@ -390,7 +389,7 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     else if(key == "VIEW_CIRCLE" && m_publish_view_circles) {
       ViewCircle vc;
       if(parseViewCircle(sval, vc)) {
-        if(isLabelBlocked(vc.label)) {
+        if(isLabelBlocked(vc.label, "VIEW_CIRCLE")) {
           debugLog("VIEW_CIRCLE: blocked label=" + vc.label);
           continue;
         }
@@ -1152,22 +1151,37 @@ string CoTGraphics::buildViewCircleCoT(const ViewCircle& vc)
 // Both checks run if both are configured.
 // ============================================================
 
-bool CoTGraphics::isLabelBlocked(const std::string& label) const
+// ============================================================
+// isLabelBlocked()
+//
+// Returns true if the label should be suppressed.
+//
+// shape_type is the MOOS variable key ("VIEW_CIRCLE",
+// "VIEW_SEGLIST", "VIEW_POLYGON", "VIEW_POINT").
+//
+// VIEW_CIRCLE is exempt from the vehicle_names filter —
+// tag circles (label=blue_one) are published by uFldTagManager
+// on shore, not bridged from vehicles, so their vehicle-name
+// labels are not a sign they should be filtered.
+//
+// Legacy label_block_contains applies to all shape types.
+// ============================================================
+
+bool CoTGraphics::isLabelBlocked(const std::string& label,
+                                  const std::string& shape_type) const
 {
-  // Primary: shoreside mode — block any label containing a vehicle name
-  if(m_shoreside_mode) {
+  // VIEW_CIRCLE: skip vehicle_names filter entirely
+  if(shape_type != "VIEW_CIRCLE" && m_shoreside_mode) {
     for(const auto& vname : m_vehicle_names) {
-      if(label.find(vname) != string::npos) {
+      if(label.find(vname) != string::npos)
         return true;
-      }
     }
   }
 
-  // Legacy: explicit substring patterns
+  // Legacy: explicit substring patterns (applies to all types)
   for(const auto& pattern : m_label_block_contains) {
-    if(label.find(pattern) != string::npos) {
+    if(label.find(pattern) != string::npos)
       return true;
-    }
   }
 
   return false;
