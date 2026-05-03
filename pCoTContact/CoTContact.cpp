@@ -382,17 +382,29 @@ bool CoTContact::parseNodeReport(const std::string& report)
 
 string CoTContact::buildPositionCoT(const VehicleState& vs)
 {
-  string cot_type = vs.friendly ? "a-f-S-C-U-N" : "a-h-S-C-U-N";
+  // In multi-vehicle mode, affiliation comes from own_set/hostile_set.
+  // In single-vehicle mode, it comes from the m_affiliation config param.
+  string affil = m_multi_mode
+    ? (vs.friendly ? "f" : "h")
+    : m_affiliation;
+
+  string cot_type = "a-" + affil + "-S-C-U-N";
   string uid      = "surveyor-" + vs.name;
 
   string t_now   = formatCoTTime(vs.timestamp, 0.0);
   string t_stale = formatCoTTime(vs.timestamp, m_cot_stale_offset);
 
+  // __group included only when team_color is non-empty.
+  // Empty team_color = map-only (hostile diamond for red team).
+  string group_elem = "";
+  if(!m_team_color.empty())
+    group_elem = "<__group name=\"" + m_team_color + "\" role=\"Team Member\"/>";
+
   string detail =
     "<detail>"
       "<contact callsign=\"" + vs.name + "\""
                " endpoint=\"*:-1:stcp\"/>"
-      "<__group name=\"Cyan\" role=\"Team Member\"/>"
+    + group_elem +
       "<uid Droid=\""        + vs.name + "\"/>"
       "<takv"
         " device=\"SeaRobotics-Surveyor\""
