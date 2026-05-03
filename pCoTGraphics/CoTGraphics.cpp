@@ -495,6 +495,40 @@ bool CoTGraphics::Iterate()
     }
   }
 
+  // Self-healing seglist expiry sweep.
+  //
+  // If a seglist hasn't been sent within seglist_stale_offset seconds it
+  // means pHelmIvP stopped publishing it (behavior deactivated, avoidance
+  // resolved). Send a delete CoT and remove it from the map so it
+  // disappears from ATAK rather than lingering until the TAK server
+  // expires it on its own schedule.
+  //
+  // Only runs when seglist_stale_offset is configured (>= 0) and the
+  // seglist has been sent at least once (last_sent > 0).
+  if(m_seglist_stale_offset >= 0.0 && m_publish_view_seglists) {
+    vector<string> to_delete;
+    for(auto& kv : m_view_seglists) {
+      const ViewSegList& vsl = kv.second;
+      if(!vsl.valid || vsl.last_sent <= 0.0) continue;
+      if((m_curr_time - vsl.last_sent) > m_seglist_stale_offset) {
+        to_delete.push_back(kv.first);
+        debugLog("Iterate: seglist stale — deleting " + kv.first);
+      }
+    }
+    for(const auto& label : to_delete) {
+      auto it = m_view_seglists.find(label);
+      if(it == m_view_seglists.end()) continue;
+      string uid = "aquaticus-vsl-" + sanitizeLabel(label);
+      double lat = it->second.vertices.empty() ? 0.0
+                 : it->second.vertices[0].first;
+      double lon = it->second.vertices.empty() ? 0.0
+                 : it->second.vertices[0].second;
+      Notify("COT_OUTBOUND", buildDeleteCoT(uid, lat, lon));
+      m_delete_cot_sent++;
+      m_view_seglists.erase(it);
+    }
+  }
+
   // Throttled VIEW_POLYGONs + UTM_ZONE_*
   if(m_publish_view_polygons) {
     for(auto& kv : m_view_polygons) {
