@@ -266,6 +266,7 @@ private:
   bool   m_publish_view_seglists;
   bool   m_publish_view_polygons;    // VIEW_POLYGON + UTM_ZONE_*
   bool   m_publish_view_circles;     // VIEW_CIRCLE
+  bool   m_immediate_view_circles;   // send VIEW_CIRCLE on every update
   bool   m_publish_flag_markers;     // FLAG_SUMMARY + VIEW_MARKER
   bool   m_publish_score_label;      // VIEW_TEXTBOX score label
 

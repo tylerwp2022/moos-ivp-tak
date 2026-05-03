@@ -37,6 +37,7 @@ CoTGraphics::CoTGraphics()
   m_publish_view_seglists    = true;
   m_publish_view_polygons    = true;
   m_publish_view_circles     = true;
+  m_immediate_view_circles   = false;
   m_publish_flag_markers     = true;
   m_publish_score_label      = true;
   m_immediate_view_points    = true;
@@ -128,6 +129,8 @@ bool CoTGraphics::OnStartUp()
       setBooleanOnString(m_immediate_view_points, value);
     else if(param == "immediate_view_seglists")
       setBooleanOnString(m_immediate_view_seglists, value);
+    else if(param == "immediate_view_circles")
+      setBooleanOnString(m_immediate_view_circles, value);
     else if(param == "stationary_send_interval")
       m_stationary_send_interval = atof(value.c_str());
     else if(param == "seglist_stale_offset") {
@@ -399,6 +402,11 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
         debugLog("VIEW_CIRCLE " + string(is_new?"[NEW]":"[UPD]") +
                  " " + vc.label +
                  " r=" + doubleToStringX(vc.radius, 1) + "m");
+        if(m_immediate_view_circles) {
+          Notify("COT_OUTBOUND", buildViewCircleCoT(m_view_circles[vc.label]));
+          m_view_circles[vc.label].last_sent = m_curr_time;
+          m_circle_cot_sent++;
+        }
       }
     }
 
@@ -540,8 +548,8 @@ bool CoTGraphics::Iterate()
     }
   }
 
-  // Throttled VIEW_CIRCLEs
-  if(m_publish_view_circles) {
+  // Throttled VIEW_CIRCLEs (when immediate_view_circles = false)
+  if(m_publish_view_circles && !m_immediate_view_circles) {
     for(auto& kv : m_view_circles) {
       ViewCircle& vc = kv.second;
       if(!vc.valid) continue;
