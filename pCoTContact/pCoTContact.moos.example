@@ -20,11 +20,14 @@
 //
 // WHAT APPEARS IN ATAK
 // --------------------
-//   Friendly (own team) → blue surface vessel icon  (a-f-S-C-U-N)
-//   Hostile  (red team) → red  surface vessel icon  (a-h-S-C-U-N)
-//   Contact updates at 1s when moving, 3s when stationary.
-//   Contact expires in ATAK after cot_stale_offset seconds
-//   with no update.
+//   affiliation=f + team_color=Cyan → cyan icon, IN contacts list
+//   affiliation=h + team_color=Red  → red icon,  IN contacts list
+//   affiliation=h (no team_color)   → hostile diamond, MAP ONLY
+//
+//   Contact updates at moving_send_interval when speed > speed_threshold,
+//   stationary_send_interval otherwise. immediate=true bypasses the
+//   throttle and sends on every NODE_REPORT.
+//   Contact expires in ATAK after cot_stale_offset seconds with no update.
 //
 // MOOS INTERFACE
 // --------------
@@ -60,6 +63,21 @@ ProcessConfig = pCoTContact
   hostile_vehicles = red_one,red_two,red_three
 
   //----------------------------------------------------------
+  // team_color — ATAK icon color for friendly contacts.
+  // Controls the <__group name="..."/> element in the CoT.
+  // Options: Cyan, Blue, Green, Red, Yellow, White, Magenta, Orange
+  // Hostile contacts never include __group regardless of team_color.
+  //----------------------------------------------------------
+  team_color = Cyan
+
+  //----------------------------------------------------------
+  // immediate — send CoT on every NODE_REPORT, disabling the
+  // moving/stationary throttle entirely. When false (default),
+  // only the throttle intervals are used.
+  //----------------------------------------------------------
+  immediate = false
+
+  //----------------------------------------------------------
   // Send rate — moving contacts update more frequently.
   // speed_threshold (m/s) determines moving vs. stationary.
   //----------------------------------------------------------
@@ -82,11 +100,17 @@ ProcessConfig = pCoTContact
 // EXAMPLE 2 — Single-vehicle mode (hardware, on the robot)
 //
 // Run on the robot's own computer. Only sees NODE_REPORT_LOCAL
-// from its own pNodeReporter. Publishes one friendly contact.
+// from its own pNodeReporter. Publishes one contact.
 //
 // own_vehicle is optional — pCoTContact will auto-learn the
 // vehicle name from the first NODE_REPORT it receives.
 // Setting it explicitly is recommended to catch config errors.
+//
+// In wp_2025, affiliation and team_color are set per team via
+// nsplug #ifdef VTEAM in plug_pCoTContact.moos.
+//
+// immediate=true is recommended for hardware — disables the
+// moving/stationary throttle and sends on every NODE_REPORT_LOCAL.
 // ============================================================
 
 // ProcessConfig = pCoTContact
@@ -98,6 +122,19 @@ ProcessConfig = pCoTContact
 //   // Set to the RNAME of this robot (e.g. blue_one).
 //   // In wp_2025 missions this is passed via nsplug: $(RNAME)
 //   own_vehicle = blue_one
+//
+//   // Affiliation and team_color — set per team via nsplug #ifdef VTEAM.
+//   // Combinations and their ATAK behavior:
+//   //   affiliation=f + team_color=Cyan → cyan icon, IN contacts list
+//   //   affiliation=f + team_color=Red  → red icon,  IN contacts list
+//   //   affiliation=h + team_color=Red  → red icon,  IN contacts list
+//   //   affiliation=h (no team_color)   → hostile diamond, MAP ONLY
+//   affiliation = f
+//   team_color  = Cyan
+//
+//   // Send on every NODE_REPORT_LOCAL — full pHelmIvP rate.
+//   // Iterate still resends at moving_send_interval as keepalive.
+//   immediate = true
 //
 //   moving_send_interval     = 1.0
 //   stationary_send_interval = 3.0
@@ -135,6 +172,8 @@ ProcessConfig = pCoTContact
 //   CommsTick = 4
 //   own_vehicles     = blue_one
 //   hostile_vehicles = red_one
+//   team_color       = Cyan
+//   immediate        = false
 //   moving_send_interval     = 1.0
 //   stationary_send_interval = 3.0
 //   debug = true

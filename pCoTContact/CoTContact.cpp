@@ -27,9 +27,7 @@ CoTContact::CoTContact()
   m_stationary_send_interval = 3.0;
   m_speed_threshold          = 0.5;
   m_cot_stale_offset         = 10.0;
-
-  m_affiliation = "f";   // default: friendly
-  m_team_color  = "";    // default: no __group element (map-only if no team_color set)
+  m_immediate                = false;
 
   m_debug        = false;
   m_pos_cot_sent = 0;
@@ -149,27 +147,9 @@ bool CoTContact::OnStartUp()
       debugLog("Config: cot_stale_offset = " +
                doubleToStringX(m_cot_stale_offset) + "s");
     }
-    else if(param == "affiliation") {
-      // f=friendly, h=hostile, n=neutral, u=unknown
-      // Used in single-vehicle mode to set the CoT type.
-      // In multi-vehicle mode, affiliation is derived from
-      // own_vehicles / hostile_vehicles membership.
-      m_affiliation = value;
-      if(m_affiliation != "f" && m_affiliation != "h" &&
-         m_affiliation != "n" && m_affiliation != "u") {
-        reportConfigWarning("pCoTContact: invalid affiliation '" +
-                            m_affiliation + "' — use f/h/n/u. Defaulting to f.");
-        m_affiliation = "f";
-      }
-      debugLog("Config: affiliation = " + m_affiliation);
-    }
-    else if(param == "team_color") {
-      // Preserve original case — ATAK team color names are capitalized.
-      // Only used for friendly contacts (<__group name="..."/>).
-      // Valid values: Cyan, Blue, Red, Green, Yellow, White, Magenta, Orange
-      string v = orig; biteStringX(v, '=');
-      m_team_color = stripBlankEnds(v);
-      debugLog("Config: team_color = " + m_team_color);
+    else if(param == "immediate") {
+      setBooleanOnString(m_immediate, value);
+      debugLog("Config: immediate = " + boolToString(m_immediate));
     }
     else
       handled = false;
@@ -223,8 +203,27 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
 
   for(auto& msg : NewMail) {
     string key = msg.m_sKey;
-    if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL")
-      parseNodeReport(msg.m_sVal);
+    if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL") {
+      if(!parseNodeReport(msg.m_sVal)) continue;
+
+      // Immediate mode: send CoT on every NODE_REPORT without waiting for
+      // the Iterate throttle. Iterate still resends on the throttle interval
+      // as a keepalive so the contact doesn't go stale between updates.
+      if(!m_immediate) continue;
+
+      string name;
+      for(auto& tok : parseString(msg.m_sVal, ',')) {
+        string t = tok;
+        if(toupper(biteStringX(t, '=')) == "NAME") { name = t; break; }
+      }
+      auto it = m_vehicles.find(name);
+      if(it != m_vehicles.end() && it->second.valid) {
+        Notify("COT_OUTBOUND", buildPositionCoT(it->second));
+        it->second.last_sent = m_curr_time;
+        m_pos_cot_sent++;
+        debugLog("OnNewMail: immediate CoT sent for " + name);
+      }
+    }
   }
 
   return true;
@@ -243,16 +242,21 @@ bool CoTContact::Iterate()
     VehicleState& vs = kv.second;
     if(!vs.valid) continue;
 
-    bool   moving   = (vs.speed > m_speed_threshold);
-    double interval = moving ? m_moving_send_interval
-                             : m_stationary_send_interval;
-    if((m_curr_time - vs.last_sent) < interval) continue;
+    // In immediate mode all sends happen in OnNewMail.
+    // Iterate only runs the throttle when immediate=false.
+    if(!m_immediate) {
+      bool   moving   = (vs.speed > m_speed_threshold);
+      double interval = moving ? m_moving_send_interval
+                               : m_stationary_send_interval;
+      if((m_curr_time - vs.last_sent) < interval) continue;
+    }
 
     Notify("COT_OUTBOUND", buildPositionCoT(vs));
     vs.last_sent = m_curr_time;
     m_pos_cot_sent++;
     debugLog("Iterate: pos CoT sent for " + vs.name +
-             " [" + string(moving ? "moving" : "static") + "]");
+             string(m_immediate ? " [immediate]" :
+                    (vs.speed > m_speed_threshold ? " [moving]" : " [static]")));
   }
 
   AppCastingMOOSApp::PostReport();
@@ -366,35 +370,17 @@ bool CoTContact::parseNodeReport(const std::string& report)
 
 string CoTContact::buildPositionCoT(const VehicleState& vs)
 {
-  // In multi-vehicle mode, affiliation comes from own_set/hostile_set.
-  // In single-vehicle mode, it comes from the m_affiliation config param.
-  string affil = m_multi_mode
-    ? (vs.friendly ? "f" : "h")
-    : m_affiliation;
-
-  string cot_type = "a-" + affil + "-S-C-U-N";
+  string cot_type = vs.friendly ? "a-f-S-C-U-N" : "a-h-S-C-U-N";
   string uid      = "surveyor-" + vs.name;
 
   string t_now   = formatCoTTime(vs.timestamp, 0.0);
   string t_stale = formatCoTTime(vs.timestamp, m_cot_stale_offset);
 
-  // __group element — included whenever team_color is configured.
-  // Controls icon color and contacts-list visibility in ATAK:
-  //   affiliation=f + team_color=Cyan → friendly cyan icon, IN contacts list
-  //   affiliation=f + team_color=Red  → friendly red icon,  IN contacts list
-  //   affiliation=h + team_color=Red  → hostile red icon,   IN contacts list
-  //   affiliation=h (no team_color)   → hostile diamond,   MAP ONLY
-  // Omit team_color entirely (leave empty) to suppress contacts list entry.
-  string group_elem = "";
-  if(!m_team_color.empty())
-    group_elem = "<__group name=\"" + m_team_color +
-                 "\" role=\"Team Member\"/>";
-
   string detail =
     "<detail>"
       "<contact callsign=\"" + vs.name + "\""
                " endpoint=\"*:-1:stcp\"/>"
-    + group_elem +
+      "<__group name=\"Cyan\" role=\"Team Member\"/>"
       "<uid Droid=\""        + vs.name + "\"/>"
       "<takv"
         " device=\"SeaRobotics-Surveyor\""

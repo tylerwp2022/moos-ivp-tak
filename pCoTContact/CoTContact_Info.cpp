@@ -22,9 +22,10 @@ void showSynopsis()
   blk("  surface vessel SA contacts to COT_OUTBOUND. pCoTBridge       ");
   blk("  forwards them to the TAK server.                              ");
   blk("                                                                ");
-  blk("  Single-vehicle mode: one robot, one friendly contact.        ");
-  blk("  Multi-vehicle mode:  full 6-vehicle CTF picture (own +       ");
-  blk("  hostile) from the shoreside MOOSDB.                          ");
+  blk("  Single-vehicle mode: one robot, one contact. Affiliation and  ");
+  blk("    team color set via config (f/h, Cyan/Red etc).              ");
+  blk("  Multi-vehicle mode:  full CTF picture from shoreside MOOSDB.  ");
+  blk("    Friendly = own_vehicles, hostile = hostile_vehicles.        ");
 }
 
 void showHelpAndExit()
@@ -62,10 +63,18 @@ void showExampleConfigAndExit()
   blu("  own_vehicles      = blue_one,blue_two,blue_three              ");
   blu("  hostile_vehicles  = red_one,red_two,red_three                 ");
   blk("                                                                ");
+  blk("  // ATAK icon color for friendly contacts.                    ");
+  blk("  // Hostile contacts never get __group regardless.            ");
+  blu("  team_color = Cyan                                             ");
+  blk("                                                                ");
   blu("  moving_send_interval     = 1.0   // seconds                  ");
   blu("  stationary_send_interval = 3.0   // seconds                  ");
   blu("  speed_threshold          = 0.5   // m/s                      ");
   blu("  cot_stale_offset         = 10.0  // seconds                  ");
+  blk("                                                                ");
+  blk("  // immediate=true disables moving/stationary throttle        ");
+  blk("  // and sends CoT on every NODE_REPORT.                       ");
+  blu("  immediate = false                                             ");
   blk("                                                                ");
   blu("  debug = false                                                 ");
   blk("}                                                               ");
@@ -77,13 +86,13 @@ void showExampleConfigAndExit()
   blk("//   CommsTick = 4                                              ");
   blk("//   own_vehicle = blue_one   // auto-learned if omitted        ");
   blk("//                                                              ");
-  blk("//   // affiliation: f=friendly, h=hostile, n=neutral, u=unknown");
-  blk("//   // In wp_2025, set via nsplug #ifdef VTEAM in plug file:   ");
-  blk("//   //   blue team: affiliation=f, team_color=Cyan             ");
-  blk("//   //   red  team: affiliation=h  (team_color unused)         ");
+  blk("//   // f=friendly h=hostile; team_color sets ATAK icon color  ");
+  blk("//   // affil=f+team_color=Cyan → cyan icon, IN contacts list  ");
+  blk("//   // affil=h (no team_color) → hostile diamond, MAP ONLY    ");
   blk("//   affiliation = f                                            ");
-  blk("//   team_color  = Cyan   // ATAK icon color for friendly only  ");
+  blk("//   team_color  = Cyan                                         ");
   blk("//                                                              ");
+  blk("//   immediate = true   // send on every NODE_REPORT_LOCAL     ");
   blk("//   moving_send_interval     = 1.0                             ");
   blk("//   stationary_send_interval = 3.0                             ");
   blk("// }                                                            ");
@@ -107,8 +116,17 @@ void showInterfaceAndExit()
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
-  blk("  COT_OUTBOUND = <event type=\"a-f-S-C-U-N\">...</event>       ");
-  blk("                 (or a-h-S-C-U-N for hostile vehicles)         ");
+  blk("  COT_OUTBOUND = <event type=\"a-{affil}-S-C-U-N\">...</event> ");
+  blk("    affil driven by affiliation= param (single-vehicle) or     ");
+  blk("    own_vehicles/hostile_vehicles membership (multi-vehicle).  ");
+  blk("                                                                ");
+  blk("KEY CONFIG PARAMS:                                              ");
+  blk("------------------------------------                            ");
+  blk("  affiliation = f|h|n|u   CoT type affiliation (default: f)   ");
+  blk("  team_color  = Cyan|Red|...  ATAK icon color via <__group>   ");
+  blk("    Omit team_color for map-only (no contacts list entry).     ");
+  blk("  immediate = true|false   true = send on every NODE_REPORT;  ");
+  blk("    moving/stationary throttle disabled.                       ");
   blk("                                                                ");
   exit(0);
 }
