@@ -27,7 +27,10 @@ CoTContact::CoTContact()
   m_stationary_send_interval = 3.0;
   m_speed_threshold          = 0.5;
   m_cot_stale_offset         = 10.0;
-  m_immediate                = false;
+
+  m_immediate   = false;
+  m_affiliation = "f";   // default: friendly
+  m_team_color  = "";    // default: no __group (map-only if unset)
 
   m_debug        = false;
   m_pos_cot_sent = 0;
@@ -147,15 +150,7 @@ bool CoTContact::OnStartUp()
       debugLog("Config: cot_stale_offset = " +
                doubleToStringX(m_cot_stale_offset) + "s");
     }
-    else if(param == "immediate") {
-      setBooleanOnString(m_immediate, value);
-      debugLog("Config: immediate = " + boolToString(m_immediate));
-    }
     else if(param == "affiliation") {
-      // f=friendly, h=hostile, n=neutral, u=unknown
-      // Used in single-vehicle mode to set the CoT type.
-      // In multi-vehicle mode, affiliation is derived from
-      // own_vehicles / hostile_vehicles membership.
       m_affiliation = value;
       if(m_affiliation != "f" && m_affiliation != "h" &&
          m_affiliation != "n" && m_affiliation != "u") {
@@ -166,13 +161,14 @@ bool CoTContact::OnStartUp()
       debugLog("Config: affiliation = " + m_affiliation);
     }
     else if(param == "team_color") {
-      // Preserve original case — ATAK team color names are capitalized.
-      // Controls <__group name="..."/> in CoT detail block.
-      // Included whenever non-empty, regardless of affiliation.
-      // Leave empty for map-only (no contacts list entry).
+      // Preserve case — ATAK team color names are capitalized
       string v = orig; biteStringX(v, '=');
       m_team_color = stripBlankEnds(v);
       debugLog("Config: team_color = " + m_team_color);
+    }
+    else if(param == "immediate") {
+      setBooleanOnString(m_immediate, value);
+      debugLog("Config: immediate = " + boolToString(m_immediate));
     }
     else
       handled = false;
@@ -228,12 +224,7 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
     string key = msg.m_sKey;
     if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL") {
       if(!parseNodeReport(msg.m_sVal)) continue;
-
-      // Immediate mode: send CoT on every NODE_REPORT without waiting for
-      // the Iterate throttle. Iterate still resends on the throttle interval
-      // as a keepalive so the contact doesn't go stale between updates.
       if(!m_immediate) continue;
-
       string name;
       for(auto& tok : parseString(msg.m_sVal, ',')) {
         string t = tok;
@@ -265,8 +256,6 @@ bool CoTContact::Iterate()
     VehicleState& vs = kv.second;
     if(!vs.valid) continue;
 
-    // In immediate mode all sends happen in OnNewMail.
-    // Iterate only runs the throttle when immediate=false.
     if(!m_immediate) {
       bool   moving   = (vs.speed > m_speed_threshold);
       double interval = moving ? m_moving_send_interval
