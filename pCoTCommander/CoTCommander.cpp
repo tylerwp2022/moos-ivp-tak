@@ -697,7 +697,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     static const set<string> cmd_keywords = {
       "deploy", "return", "rtb", "station", "hold", "pause",
       "play", "stop", "status", "attack", "defend", "help",
-      "atak", "resume"
+      "atak", "resume", "avoid", "untag"
     };
 
     size_t space      = cmd.find(' ');
@@ -708,7 +708,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       if(space == string::npos) {
         Notify("ATAK_CHAT_OUT",
                "message=Unknown command. Use: deploy, return, station, "
-               "pause, atak, resume, play, stop, status, attack, defend, or "
+               "pause, atak, resume, avoid on/off, untag on/off, "
+               "play, stop, status, attack, defend, or "
                "<vehicle> <command> (e.g. blue_one attack)."
                "|chatroom=" + reply_to);
         debugLog("handleChatCommand: unrecognized first word=" + first_word);
@@ -889,6 +890,52 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   // ========================================================
   // Help — list available commands
   // ========================================================
+  // ========================================================
+  // Collision avoidance toggle — ATAK_AVOID_COLLISIONS
+  // ========================================================
+  // "avoid on"  → true  (default): BHV_AvdColregsV22 and
+  //               BHV_AvoidCollision run normally in ATAK mode.
+  // "avoid off" → false: both collision avoidance behaviors are
+  //               suppressed. Use when deliberately maneuvering
+  //               in close quarters and self-managing spacing.
+  else if(cmd == "avoid on" || cmd == "avoid off") {
+    string val  = (cmd == "avoid on") ? "true" : "false";
+    string state = (cmd == "avoid on") ? "on" : "off";
+    Notify("ATAK_AVOID_COLLISIONS" + sfx, val);
+    Notify("ATAK_CHAT_OUT",
+           "message=Collision avoidance " + state + " for " + target + "."
+           "|chatroom=" + reply_to);
+    m_last_command  = "ATAK_AVOID_COLLISIONS" + sfx + "=" + val +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] ATAK_AVOID_COLLISIONS" + sfx +
+                "=" + val + " from " + callsign);
+  }
+
+  // ========================================================
+  // Tagged auto-recovery toggle — ATAK_AUTO_UNTAG
+  // ========================================================
+  // "untag on"  → true  (default): when tagged in ATAK mode,
+  //               the vehicle automatically returns to home
+  //               flag to get untagged, then resumes the ATAK
+  //               waypoint.
+  // "untag off" → false: the vehicle ignores tag events and
+  //               stays on the ATAK waypoint. Use when you want
+  //               full manual control over tag recovery.
+  else if(cmd == "untag on" || cmd == "untag off") {
+    string val   = (cmd == "untag on") ? "true" : "false";
+    string state = (cmd == "untag on") ? "on" : "off";
+    Notify("ATAK_AUTO_UNTAG" + sfx, val);
+    Notify("ATAK_CHAT_OUT",
+           "message=Auto-untag " + state + " for " + target + "."
+           "|chatroom=" + reply_to);
+    m_last_command  = "ATAK_AUTO_UNTAG" + sfx + "=" + val +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] ATAK_AUTO_UNTAG" + sfx +
+                "=" + val + " from " + callsign);
+  }
+
   else if(cmd == "help") {
     // Vehicle mode: only commands that apply to this vehicle.
     // Fleet mode: full set including per-vehicle prefix syntax.
@@ -906,7 +953,9 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "attack          - ATTACK_MED&#10;"
         "defend          - DEFEND_MED&#10;"
         "attack easy     - ATTACK_E&#10;"
-        "defend easy     - DEFEND_E";
+        "defend easy     - DEFEND_E&#10;"
+        "avoid on/off    - collision avoidance&#10;"
+        "untag on/off    - auto-untag when tagged";
     } else {
       help_msg =
         "Commands (use underscores: blue_one, red_two):&#10;"
@@ -923,6 +972,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "defend          - DEFEND_MED (all)&#10;"
         "attack easy     - ATTACK_E (all)&#10;"
         "defend easy     - DEFEND_E (all)&#10;"
+        "avoid on/off    - collision avoidance&#10;"
+        "untag on/off    - auto-untag when tagged&#10;"
         "vehicle cmd     - target one vehicle&#10;"
         "  e.g. blue_one attack, red_two deploy";
     }
