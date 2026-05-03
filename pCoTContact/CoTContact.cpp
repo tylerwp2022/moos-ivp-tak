@@ -151,6 +151,29 @@ bool CoTContact::OnStartUp()
       setBooleanOnString(m_immediate, value);
       debugLog("Config: immediate = " + boolToString(m_immediate));
     }
+    else if(param == "affiliation") {
+      // f=friendly, h=hostile, n=neutral, u=unknown
+      // Used in single-vehicle mode to set the CoT type.
+      // In multi-vehicle mode, affiliation is derived from
+      // own_vehicles / hostile_vehicles membership.
+      m_affiliation = value;
+      if(m_affiliation != "f" && m_affiliation != "h" &&
+         m_affiliation != "n" && m_affiliation != "u") {
+        reportConfigWarning("pCoTContact: invalid affiliation '" +
+                            m_affiliation + "' — use f/h/n/u. Defaulting to f.");
+        m_affiliation = "f";
+      }
+      debugLog("Config: affiliation = " + m_affiliation);
+    }
+    else if(param == "team_color") {
+      // Preserve original case — ATAK team color names are capitalized.
+      // Controls <__group name="..."/> in CoT detail block.
+      // Included whenever non-empty, regardless of affiliation.
+      // Leave empty for map-only (no contacts list entry).
+      string v = orig; biteStringX(v, '=');
+      m_team_color = stripBlankEnds(v);
+      debugLog("Config: team_color = " + m_team_color);
+    }
     else
       handled = false;
 
