@@ -116,22 +116,6 @@ private:
   double m_cot_stale_offset;          // seconds until ATAK marks contact stale
   bool   m_immediate;                 // true = send on every NODE_REPORT;
                                       // moving/stationary throttle disabled.
-                                      // false = use throttle intervals only.
-
-  // --------------------------------------------------------
-  // Single-vehicle affiliation and team color
-  //
-  // affiliation: f=friendly, h=hostile, n=neutral, u=unknown
-  //   In multi-vehicle mode derived from own_set/hostile_set.
-  //   In single-vehicle mode set via config param.
-  //
-  // team_color: ATAK icon color string for <__group name="..."/>.
-  //   Included whenever non-empty, regardless of affiliation.
-  //   Leave empty for map-only (no contacts list entry).
-  //   Values: Cyan, Blue, Red, Green, Yellow, White, Magenta, Orange
-  // --------------------------------------------------------
-  std::string m_affiliation;   // "f" | "h" | "n" | "u"
-  std::string m_team_color;    // ATAK team color, or empty for map-only
 
   // --------------------------------------------------------
   // Debug
