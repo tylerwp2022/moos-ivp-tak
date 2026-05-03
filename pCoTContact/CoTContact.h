@@ -118,6 +118,20 @@ private:
                                       // moving/stationary throttle disabled.
 
   // --------------------------------------------------------
+  // Single-vehicle affiliation and team color
+  //
+  //   affiliation=f, team_color=Cyan → friendly cyan,  IN contacts list
+  //   affiliation=h, team_color=Red  → hostile red,    IN contacts list
+  //   affiliation=h (no team_color)  → hostile diamond, MAP ONLY
+  //
+  // In multi-vehicle mode, affiliation is derived from
+  // m_own_set / m_hostile_set; team_color from config applies
+  // to all friendly vehicles tracked by this instance.
+  // --------------------------------------------------------
+  std::string m_affiliation;   // "f" | "h" | "n" | "u" (default: "f")
+  std::string m_team_color;    // ATAK team color, or empty for map-only
+
+  // --------------------------------------------------------
   // Debug
   // --------------------------------------------------------
   bool m_debug;
