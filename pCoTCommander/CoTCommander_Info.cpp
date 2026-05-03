@@ -76,7 +76,7 @@ void showExampleConfigAndExit()
   blk("  // ---- Waypoint control ----                                ");
   blk("  // b-m-p-w-GOTO from ATAK activates the waypt_atak behavior  ");
   blk("  // Requires in .bhv:                                          ");
-  blk("  //   condition = ATAK_ACTIVE = true                           ");
+  blk("  //   condition = ATAK_MODE = true                             ");
   blk("  //   updates   = ATAK_WPT_UPDATE                              ");
   blu("  enable_waypoint_control = true                                ");
   blu("  waypoint_update_var     = ATAK_WPT_UPDATE                     ");
@@ -131,7 +131,10 @@ void showInterfaceAndExit()
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
   blk("  -- From b-m-p-w-GOTO waypoint CoT --                        ");
-  blk("  ATAK_ACTIVE     = true                                        ");
+  blk("  ATAK_MODE       = true                                        ");
+  blk("    Enters operator control. Game behaviors condition on        ");
+  blk("    ATAK_MODE!=true and yield until 'resume' is sent.          ");
+  blk("  ATAK_WAYPT_ACTIVE = true                                      ");
   blk("    Activates waypt_atak behavior in pHelmIvP.                 ");
   blk("  ATAK_WPT_UPDATE = points=x,y # capture_radius=r              ");
   blk("    BHV_Waypoint update string. Var name is configurable.      ");
@@ -141,6 +144,12 @@ void showInterfaceAndExit()
   blk("  MOOS_MANUAL_OVERRIDE[_ALL] = true|false                      ");
   blk("  RETURN[_ALL]               = true|false                      ");
   blk("  STATION_KEEP[_ALL]         = true                            ");
+  blk("  ATAK_MODE[_ALL]            = true|false                      ");
+  blk("    true  → 'atak' command or any incoming waypoint.           ");
+  blk("    false → 'resume', 'return', 'station', or 'pause'.         ");
+  blk("  ATAK_WAYPT_ACTIVE[_ALL]    = true|false                      ");
+  blk("    true  → incoming waypoint.                                  ");
+  blk("    false → 'resume', 'return', 'station', or 'pause'.         ");
   blk("  AQUATICUS_GAME_ALL         = play|pause  (fleet mode only)   ");
   blk("  ACTION[_<VEHICLE>]         = ATTACK_MED|ATTACK_E|            ");
   blk("                               DEFEND_MED|DEFEND_E             ");

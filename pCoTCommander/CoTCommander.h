@@ -43,7 +43,8 @@
 /*                      ↓                                   */
 /*               pCoTCommander                              */
 /*                      ↓                                   */
-/*    CoT commands  → ATAK_ACTIVE + ATAK_WPT_UPDATE         */
+/*    CoT commands  → ATAK_MODE + ATAK_WAYPT_ACTIVE +       */
+/*                    ATAK_WPT_UPDATE                        */
 /*    Chat commands → DEPLOY[_ALL], RETURN[_ALL],           */
 /*                    STATION_KEEP[_ALL],                   */
 /*                    MOOS_MANUAL_OVERRIDE[_ALL],           */
@@ -52,18 +53,32 @@
 /*                                                          */
 /*  Handled CoT types:                                      */
 /*    b-m-p-w-GOTO → waypoint command                       */
-/*      Publishes: ATAK_ACTIVE = true                       */
+/*      Publishes: ATAK_MODE         = true                 */
+/*                 ATAK_WAYPT_ACTIVE = true                 */
 /*                 ATAK_WPT_UPDATE = points=x,y #           */
 /*                                   capture_radius=r       */
 /*      Requires waypt_atak behavior in .bhv with:          */
-/*        condition = ATAK_ACTIVE = true                    */
+/*        condition = ATAK_MODE = true                      */
+/*        condition = ATAK_WAYPT_ACTIVE = true              */
 /*        updates   = ATAK_WPT_UPDATE                       */
 /*                                                          */
 /*  Supported chat commands (via ATAK GeoChat):             */
 /*    deploy          → DEPLOY[_ALL]=true + overrides       */
 /*    return | rtb    → RETURN[_ALL]=true                   */
+/*                      ATAK_MODE[_ALL]=false               */
+/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
 /*    station | hold  → STATION_KEEP[_ALL]=true             */
+/*                      ATAK_MODE[_ALL]=false               */
+/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
 /*    pause           → MOOS_MANUAL_OVERRIDE[_ALL]=true     */
+/*                      ATAK_MODE[_ALL]=false               */
+/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
+/*    atak            → ATAK_MODE[_ALL]=true                */
+/*                      Enters operator control; game       */
+/*                      behaviors yield until "resume".     */
+/*    resume          → ATAK_MODE[_ALL]=false               */
+/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
+/*                      Returns to autonomous strategy.     */
 /*    play            → AQUATICUS_GAME_ALL=play (fleet only)*/
 /*    stop            → AQUATICUS_GAME_ALL=pause (fleet only*/
 /*    status          → DM reply with deployment state      */
@@ -85,7 +100,8 @@
 /*                NODE_REPORT_LOCAL                         */
 /*                ATAK_WPT_REACHED (waypt endflag)          */
 /*                DEPLOY          (deployment state)        */
-/*    Publishes:  ATAK_ACTIVE    (bool string)              */
+/*    Publishes:  ATAK_MODE     (bool string)               */
+/*                ATAK_WAYPT_ACTIVE (bool string)            */
 /*                ATAK_WPT_UPDATE (BHV_Waypoint update str) */
 /*                DEPLOY[_ALL], RETURN[_ALL],               */
 /*                STATION_KEEP[_ALL],                       */
@@ -146,7 +162,8 @@ protected:
 
   // b-m-p-w-GOTO — "Go To" waypoint from ATAK.
   // Converts lat/lon to local XY via CoTGeodesy and publishes
-  // ATAK_ACTIVE=true + ATAK_WPT_UPDATE to pHelmIvP.
+  // ATAK_MODE=true + ATAK_WAYPT_ACTIVE=true + ATAK_WPT_UPDATE
+  // to pHelmIvP.
   void handleWaypointCoT(const std::string& uid,
                           double lat, double lon,
                           const std::string& xml);

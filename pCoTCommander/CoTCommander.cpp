@@ -461,14 +461,19 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
 // Handles a b-m-p-w-GOTO "Go To" waypoint from ATAK.
 //
 // Converts the CoT lat/lon to local XY via CoTGeodesy and
-// publishes two MOOS variables:
+// publishes three MOOS variables:
 //
-//   ATAK_ACTIVE = true
+//   ATAK_MODE = true
+//     Enters operator control. Game behaviors condition on
+//     ATAK_MODE!=true and yield until "resume" is sent.
+//
+//   ATAK_WAYPT_ACTIVE = true
 //     Activates the waypt_atak behavior in pHelmIvP.
 //     This behavior must be configured with:
-//       condition = ATAK_ACTIVE = true
+//       condition = ATAK_MODE = true
+//       condition = ATAK_WAYPT_ACTIVE = true
 //       updates   = ATAK_WPT_UPDATE
-//       pwt       = 150  (higher than survey, lower than const_speed)
+//       pwt       = 150
 //
 //   ATAK_WPT_UPDATE = "points=x,y # capture_radius=r"
 //     Updates the behavior's target point. The '#' separator
@@ -530,7 +535,12 @@ void CoTCommander::handleWaypointCoT(const std::string& uid,
                 + ","                   + doubleToStringX(y, 2)
                 + " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
 
-  Notify("ATAK_ACTIVE",         string("true"));
+  // ATAK_MODE=true  — vehicle enters operator control; game behaviors yield.
+  // ATAK_WAYPT_ACTIVE=true — activates the waypt_atak behavior in pHelmIvP.
+  // Both are posted together so the behavior fires immediately on this tick.
+
+  Notify("ATAK_MODE",         string("true"));
+  Notify("ATAK_WAYPT_ACTIVE", string("true"));
   Notify(m_waypoint_update_var, update);
   m_waypoint_commands++;
 
@@ -691,7 +701,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     // Anything else is treated as a vehicle name prefix.
     static const set<string> cmd_keywords = {
       "deploy", "return", "rtb", "station", "hold", "pause",
-      "play", "stop", "status", "attack", "defend", "help"
+      "play", "stop", "status", "attack", "defend", "help",
+      "atak", "resume"
     };
 
     size_t space      = cmd.find(' ');
@@ -702,7 +713,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       if(space == string::npos) {
         Notify("ATAK_CHAT_OUT",
                "message=Unknown command. Use: deploy, return, station, "
-               "pause, play, stop, status, attack, defend, or "
+               "pause, atak, resume, play, stop, status, attack, defend, or "
                "<vehicle> <command> (e.g. blue_one attack)."
                "|chatroom=" + reply_to);
         debugLog("handleChatCommand: unrecognized first word=" + first_word);
@@ -746,6 +757,9 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     Notify("DEPLOY"               + sfx, "true");
     Notify("MOOS_MANUAL_OVERRIDE" + sfx, "false");
     Notify("RETURN"               + sfx, "true");
+    // Exit ATAK mode — vehicle resumes autonomous strategy
+    Notify("ATAK_MODE"            + sfx, "false");
+    Notify("ATAK_WAYPT_ACTIVE"    + sfx, "false");
     string verb = (sfx == "_ALL") ? "All vehicles returning"
                                   : (target + " returning");
     Notify("ATAK_CHAT_OUT",
@@ -760,7 +774,10 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   // Station keep
   // ========================================================
   else if(cmd == "station" || cmd == "hold") {
-    Notify("STATION_KEEP" + sfx, "true");
+    Notify("STATION_KEEP"      + sfx, "true");
+    // Exit ATAK mode — vehicle resumes autonomous strategy
+    Notify("ATAK_MODE"         + sfx, "false");
+    Notify("ATAK_WAYPT_ACTIVE" + sfx, "false");
     string verb = (sfx == "_ALL") ? "All vehicles holding"
                                   : (target + " holding");
     Notify("ATAK_CHAT_OUT",
@@ -777,6 +794,9 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   else if(cmd == "pause") {
     Notify("DEPLOY"               + sfx, "false");
     Notify("MOOS_MANUAL_OVERRIDE" + sfx, "true");
+    // Exit ATAK mode — vehicle resumes autonomous strategy when unpaused
+    Notify("ATAK_MODE"            + sfx, "false");
+    Notify("ATAK_WAYPT_ACTIVE"    + sfx, "false");
     string verb = (sfx == "_ALL") ? "All vehicles paused"
                                   : (target + " paused");
     Notify("ATAK_CHAT_OUT",
@@ -786,6 +806,44 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     m_chat_commands++;
     reportEvent("pCoTCommander: [CHAT] PAUSE" + sfx +
                 " from " + callsign);
+  }
+
+  // ========================================================
+  // ATAK mode — enter operator control
+  // ========================================================
+  // Suppresses all game behaviors (they condition on ATAK_MODE!=true).
+  // Vehicle will hold its current position until the operator sends
+  // a waypoint or other ATAK command. Sending a waypoint from ATAK
+  // also enters this mode automatically, so this command is mainly
+  // useful to pre-stage the vehicle before the first waypoint arrives.
+  else if(cmd == "atak") {
+    Notify("ATAK_MODE" + sfx, "true");
+    string verb = (sfx == "_ALL") ? "All vehicles"
+                                  : target;
+    Notify("ATAK_CHAT_OUT",
+           "message=" + verb + " in ATAK mode. Send waypoint or 'resume' to exit."
+           "|chatroom=" + reply_to);
+    m_last_command  = "ATAK_MODE" + sfx + "=true (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] ATAK_MODE" + sfx + "=true from " + callsign);
+  }
+
+  // ========================================================
+  // Resume — exit operator control, back to game strategy
+  // ========================================================
+  // Clears ATAK_MODE and ATAK_WAYPT_ACTIVE so game behaviors
+  // (attack/defend/loiter) resume on their next iterate tick.
+  else if(cmd == "resume") {
+    Notify("ATAK_MODE"         + sfx, "false");
+    Notify("ATAK_WAYPT_ACTIVE" + sfx, "false");
+    string verb = (sfx == "_ALL") ? "All vehicles"
+                                  : target;
+    Notify("ATAK_CHAT_OUT",
+           "message=" + verb + " resuming autonomous strategy."
+           "|chatroom=" + reply_to);
+    m_last_command  = "RESUME / ATAK_MODE" + sfx + "=false (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] RESUME" + sfx + " from " + callsign);
   }
 
   // ========================================================
@@ -840,9 +898,11 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     string help_msg =
       "Commands (use underscores: blue_one, red_two):&#10;"
       "deploy          - activate vehicle(s)&#10;"
-      "return / rtb    - send to base&#10;"
-      "station / hold  - hold position&#10;"
-      "pause           - manual override on&#10;"
+      "return / rtb    - send to base, exit ATAK mode&#10;"
+      "station / hold  - hold position, exit ATAK mode&#10;"
+      "pause           - manual override on, exit ATAK mode&#10;"
+      "atak            - enter ATAK operator control&#10;"
+      "resume          - exit ATAK mode, resume strategy&#10;"
       "play            - start game&#10;"
       "stop            - stop game&#10;"
       "status          - deployment state&#10;"
@@ -871,10 +931,10 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     if(action_val.empty()) {
       string help = m_fleet_mode
         ? "message=Unknown command. Try: deploy, return, station, "
-          "pause, play, stop, status, attack, defend, "
+          "pause, atak, resume, play, stop, status, attack, defend, "
           "or <vehicle> <command> (e.g. blue_one attack)."
         : "message=Unknown command. Try: deploy, return, station, "
-          "pause, status, attack, defend.";
+          "pause, atak, resume, status, attack, defend.";
       Notify("ATAK_CHAT_OUT", help + "|chatroom=" + reply_to);
       debugLog("handleChatCommand: unrecognized cmd=" + cmd);
       return;
