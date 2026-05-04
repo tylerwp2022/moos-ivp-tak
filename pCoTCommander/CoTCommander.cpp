@@ -582,11 +582,21 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
      type == "b-m-p-s-m") {
     string event_uid = extractAttr(xml, "uid");
     if(event_uid == m_flag_uid) {
-      // Team filter: skip if the flag uid contains our own team
-      // name -- that would be our own flag, not the opponent's.
-      // e.g. blue vehicles skip "aquaticus-flag-blue";
-      //      red  vehicles skip "aquaticus-flag-red".
-      // flag_my_team is set to $(VTEAM) in the plug file.
+      // SA broadcast check: pCoTGraphics adds
+      // <_aquaticus_graphics sa_broadcast="true"/> to every flag
+      // position update it sends to TAK. This marks it as a map
+      // display broadcast, not an operator pursuit command.
+      // Skip it silently -- it is still rendered on ATAK maps,
+      // but does not trigger autonomous flag pursuit.
+      // A pursuit command from an ATAK plugin or operator tool
+      // will NOT include this element, so it passes through here.
+      if(xml.find("sa_broadcast=\"true\"") != string::npos) {
+        debugLog("dispatchInboundCoT: flag CoT is sa_broadcast -- skipping");
+        return false;
+      }
+
+      // Team filter: belt-and-suspenders -- skip if the flag uid
+      // contains this vehicle's own team name (own flag, not opponent).
       if(!m_flag_my_team.empty()) {
         string uid_lower = tolower(event_uid);
         if(uid_lower.find(m_flag_my_team) != string::npos) {
@@ -595,6 +605,7 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
           return false;
         }
       }
+
       if(!lat_str.empty() && !lon_str.empty()) {
         handleFlagCoT(uid, lat, lon, xml);
         m_cot_handled++;

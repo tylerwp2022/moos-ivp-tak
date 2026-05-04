@@ -1394,6 +1394,11 @@ string CoTGraphics::buildViewMarkerGraphicCoT(const ViewMarkerGraphic& vm)
   // the colored icon in ATAK, not just the <color> element alone
   string iconpath = "COT_MAPPING_SPOTMAP/b-m-p-s-m/" + argb;
 
+  // _aquaticus_graphics sa_broadcast="true" marks this CoT as a
+  // shoreside SA position broadcast, not an operator pursuit command.
+  // pCoTCommander checks for this element in dispatchInboundCoT and
+  // skips flag pursuit when it is present. A pursuit command CoT sent
+  // by an operator or ATAK plugin will NOT include this element.
   string detail =
     "<detail>"
       "<contact callsign=\"" + vm.label + " flag\"/>"
@@ -1403,6 +1408,7 @@ string CoTGraphics::buildViewMarkerGraphicCoT(const ViewMarkerGraphic& vm)
       "<usericon iconsetpath=\"" + iconpath + "\"/>"
       "<color argb=\""           + argb     + "\"/>"
       "<remarks/>"
+      "<_aquaticus_graphics sa_broadcast=\"true\"\/>"
     "</detail>";
 
   return
