@@ -751,7 +751,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     static const set<string> cmd_keywords = {
       "deploy", "return", "rtb", "station", "hold", "pause",
       "play", "stop", "status", "attack", "defend", "help",
-      "atak", "resume", "avoid", "untag", "retry"
+      "atak", "resume", "avoid", "untag", "retry", "opreg"
     };
 
     size_t space      = cmd.find(' ');
@@ -762,7 +762,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       if(space == string::npos) {
         Notify("ATAK_CHAT_OUT",
                "message=Unknown command. Use: deploy, return, station, "
-               "pause, atak, resume, avoid on/off, untag on/off, retry on/off, "
+               "pause, atak, resume, avoid on/off, untag on/off, "
+               "retry on/off, opreg on/off, "
                "play, stop, status, attack, defend, or "
                "<vehicle> <command> (e.g. blue_one attack)."
                "|chatroom=" + reply_to);
@@ -971,6 +972,34 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   }
 
   // ========================================================
+  // OpRegion recovery toggle — ATAK_OPREG_RECOVER
+  // ========================================================
+  // "opreg on"  (default): BHV_OpRegionRecover enforces the field
+  //   boundary in ATAK mode. Robot will be pulled back if it leaves
+  //   the operating region (e.g. after a waypoint near the edge).
+  // "opreg off": boundary recovery is suppressed in ATAK mode.
+  //   Use with caution -- robot can leave the field entirely.
+  //   Autonomous strategy mode is unaffected; recovery always
+  //   runs when ATAK_MODE=false regardless of this setting.
+  else if(cmd == "opreg on" || cmd == "opreg off") {
+    string val   = (cmd == "opreg on") ? "true" : "false";
+    string state = (cmd == "opreg on") ? "on" : "off";
+    Notify("ATAK_OPREG_RECOVER" + sfx, val);
+    // Include a warning when turning off so the operator knows
+    // the robot can leave the field boundary entirely.
+    string opreg_msg = (cmd == "opreg on")
+      ? "message=Boundary recovery on for " + target + "."
+      : "message=WARNING: Boundary recovery off for " + target +
+        ". Robot may leave the field.";
+    Notify("ATAK_CHAT_OUT", opreg_msg + "|chatroom=" + reply_to);
+    m_last_command  = "ATAK_OPREG_RECOVER" + sfx + "=" + val +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] ATAK_OPREG_RECOVER" + sfx +
+                "=" + val + " from " + callsign);
+  }
+
+  // ========================================================
   // Collision avoidance toggle — ATAK_AVOID_COLLISIONS
   // ========================================================
   // "avoid on"  → true  (default): BHV_AvdColregsV22 and
@@ -1036,7 +1065,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "defend easy     - DEFEND_E&#10;"
         "avoid on/off    - collision avoidance&#10;"
         "untag on/off    - auto-untag when tagged&#10;"
-        "retry on/off    - retry waypoint after tag";
+        "retry on/off    - retry waypoint after tag&#10;"
+        "opreg on/off    - boundary recovery";
     } else {
       help_msg =
         "Commands (use underscores: blue_one, red_two):&#10;"
@@ -1056,6 +1086,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "avoid on/off    - collision avoidance&#10;"
         "untag on/off    - auto-untag when tagged&#10;"
         "retry on/off    - retry waypoint after tag&#10;"
+        "opreg on/off    - boundary recovery&#10;"
         "vehicle cmd     - target one vehicle&#10;"
         "  e.g. blue_one attack, red_two deploy";
     }
