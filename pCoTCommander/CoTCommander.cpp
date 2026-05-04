@@ -49,6 +49,8 @@ CoTCommander::CoTCommander()
   // Flag pursuit defaults
   m_flag_pursuit_enabled   = true;
   m_flag_uid               = "aquaticus-flag-red";
+  m_flag_my_team           = "";   // set to $(VTEAM) in plug file
+  m_flag_capture_radius    = 5.0;  // smaller than capture_radius (15m)
   m_flag_pursuit           = false;
   m_flag_pursuit_notified  = false;
   m_flag_last_lat          = 0.0;
@@ -168,6 +170,40 @@ bool CoTCommander::OnStartUp()
       setBooleanOnString(use_nav_fallback, value);
       debugLog("Config: use_nav_fallback = " + boolToString(use_nav_fallback));
     }
+    // ---- Flag pursuit config ----
+    else if(param == "flag_pursuit_enabled") {
+      setBooleanOnString(m_flag_pursuit_enabled, value);
+      debugLog("Config: flag_pursuit_enabled = " +
+               boolToString(m_flag_pursuit_enabled));
+    }
+    else if(param == "flag_uid") {
+      string v = orig; biteStringX(v, '=');
+      m_flag_uid = stripBlankEnds(v);
+      debugLog("Config: flag_uid = " + m_flag_uid);
+    }
+    else if(param == "flag_capture_radius") {
+      m_flag_capture_radius = atof(value.c_str());
+      debugLog("Config: flag_capture_radius = " +
+               doubleToStringX(m_flag_capture_radius, 1));
+    }
+    else if(param == "flag_my_team") {
+      string v = orig; biteStringX(v, '=');
+      m_flag_my_team = tolower(stripBlankEnds(v));
+      debugLog("Config: flag_my_team = " + m_flag_my_team);
+    }
+    else if(param == "team_flag_vars") {
+      // Comma-separated list: HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,...
+      string v = orig; biteStringX(v, '=');
+      v = stripBlankEnds(v);
+      vector<string> vars = parseStringQ(v, ',');
+      for(auto& var : vars) {
+        var = stripBlankEnds(var);
+        if(!var.empty())
+          m_team_flag_vars.push_back(var);
+      }
+      debugLog("Config: team_flag_vars count=" +
+               intToString((int)m_team_flag_vars.size()));
+    }
     else
       handled = false;
 
@@ -207,7 +243,7 @@ bool CoTCommander::OnStartUp()
   // OnNewMail(). Skip Iterate() ticks when no mail has arrived.
   // This eliminates unnecessary CPU usage vs a fixed tick rate.
   SetIterateMode(COMMS_DRIVEN_ITERATE_AND_MAIL);
-
+  // Flag pursuit params are parsed in the STRING_LIST loop above.
   registerVariables();
   return true;
 }
@@ -244,6 +280,12 @@ void CoTCommander::registerVariables()
   if(!m_fleet_mode) {
     Register("ATAK_MODE", 0);
     Register("TAGGED",    0);
+    // Subscribe to each HAS_FLAG variable so we detect when
+    // any teammate secures the red flag and stop pursuit.
+    if(m_flag_pursuit_enabled) {
+      for(const string& var : m_team_flag_vars)
+        Register(var, 0);
+    }
   }
 }
 
@@ -380,8 +422,9 @@ bool CoTCommander::OnNewMail(MOOSMSG_LIST &NewMail)
           m_flag_pursuit_notified = false;
           // Determine who secured it for the DM
           string holder = key; // e.g. HAS_FLAG_BLUE_ONE
+          // Same fallback logic: use vehicle callsign not All Chat Rooms
           string chat_dest = m_last_sender_callsign.empty()
-                             ? "All Chat Rooms"
+                             ? m_command_chatroom
                              : m_last_sender_callsign;
           Notify("ATAK_CHAT_OUT",
                  "message=Flag secured (" + holder + " = true). "
@@ -539,6 +582,19 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
      type == "b-m-p-s-m") {
     string event_uid = extractAttr(xml, "uid");
     if(event_uid == m_flag_uid) {
+      // Team filter: skip if the flag uid contains our own team
+      // name -- that would be our own flag, not the opponent's.
+      // e.g. blue vehicles skip "aquaticus-flag-blue";
+      //      red  vehicles skip "aquaticus-flag-red".
+      // flag_my_team is set to $(VTEAM) in the plug file.
+      if(!m_flag_my_team.empty()) {
+        string uid_lower = tolower(event_uid);
+        if(uid_lower.find(m_flag_my_team) != string::npos) {
+          debugLog("dispatchInboundCoT: flag uid contains my team ("
+                   + m_flag_my_team + ") -- skipping own flag");
+          return false;
+        }
+      }
       if(!lat_str.empty() && !lon_str.empty()) {
         handleFlagCoT(uid, lat, lon, xml);
         m_cot_handled++;
@@ -723,9 +779,12 @@ void CoTCommander::handleFlagCoT(const string& uid,
   m_flag_last_lat = lat;
   m_flag_last_lon = lon;
 
+  // Use flag_capture_radius (default 5m) rather than the general
+  // capture_radius (default 15m) so the robot drives into the
+  // Aquaticus grab zone rather than stopping short of it.
   string update = "points="             + doubleToStringX(x, 2)
                 + ","                   + doubleToStringX(y, 2)
-                + " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
+                + " # capture_radius=" + doubleToStringX(m_flag_capture_radius, 1);
 
   Notify("ATAK_MODE",           string("true"));
   Notify("ATAK_WAYPT_ACTIVE",   string("true"));
@@ -738,8 +797,12 @@ void CoTCommander::handleFlagCoT(const string& uid,
   string lat_str = doubleToStringX(lat, 5);
   string lon_str = doubleToStringX(lon, 5);
 
+  // Prefer the last known operator sender for DMs.
+  // Fall back to m_command_chatroom (this vehicle's own callsign)
+  // rather than "All Chat Rooms" -- flag CoT has no human sender
+  // so broadcasting to all rooms would spam every ATAK client.
   string chat_dest = m_last_sender_callsign.empty()
-                     ? "All Chat Rooms"
+                     ? m_command_chatroom
                      : m_last_sender_callsign;
 
   if(!m_flag_pursuit_notified) {

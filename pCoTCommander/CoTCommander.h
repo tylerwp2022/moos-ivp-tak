@@ -357,6 +357,20 @@ private:
   // Default: "aquaticus-flag-red"
   std::string m_flag_uid;
 
+  // Config: this vehicle's own team name (lowercase), e.g. "blue".
+  // Set to $(VTEAM) in the plug file. If the flag_uid contains this
+  // string, the flag CoT is skipped (it's our own flag, not the
+  // opponent's). Prevents red robots from pursuing their own flag
+  // when all vehicles share the same plug file.
+  // Leave empty to disable team filtering.
+  std::string m_flag_my_team;
+
+  // Config: capture radius used for flag pursuit waypoints.
+  // Smaller than m_capture_radius (15m) so the robot drives
+  // into the Aquaticus grab zone rather than stopping short.
+  // Default: 5.0m. Set to match the game grab zone radius.
+  double      m_flag_capture_radius;
+
   // Config: list of MOOS variables indicating any teammate
   // (including self) has possession of the flag.
   // e.g. HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
