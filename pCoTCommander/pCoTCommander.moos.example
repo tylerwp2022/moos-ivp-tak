@@ -1,58 +1,112 @@
-//------------------------------------------
-// pCoTCommander Example MOOS Configuration
+//------------------------------------------------------------------
+// pCoTCommander_moos.example
 //
-// pCoTCommander subscribes to COT_INBOUND (raw CoT XML published
-// by pCoTBridge) and ATAK_CHAT_IN (published by pCoTChat) and
-// translates operator commands from ATAK into MOOS variable
-// publications for pHelmIvP behaviors.
+// Example MOOS configuration for pCoTCommander.
+// Covers both fleet (shoreside) and vehicle modes.
 //
-// REQUIRES pCoTBridge and pCoTChat to be running on the same
-// MOOSDB. pCoTCommander has no TAK server connection of its own.
+// pCoTCommander translates operator commands from ATAK into MOOS
+// variable publications for pHelmIvP behaviors. It requires
+// pCoTBridge (publishes COT_INBOUND) and pCoTChat (publishes
+// ATAK_CHAT_IN) to be running on the same MOOSDB.
 //
 // TWO DEPLOYMENT MODES
 // ------------------------------------------------------------------
 // fleet_mode = true  (SHORESIDE MOOSDB):
-//   command_chatroom = AQUATICUS-SHORE (must match SHORE_CALLSIGN)
-//   Posts *_ALL variables — uFldShoreBroker routes them to all
-//   vehicle communities as bare variable names.
+//   Posts *_ALL variables -- uFldShoreBroker routes to all vehicles.
+//   Chatroom = AQUATICUS-SHORE (must match SHORE_CALLSIGN in pCoTChat)
 //   Prefix any command with a vehicle name to target one vehicle:
-//     "deploy"          → DEPLOY_ALL=true
-//     "blue_one deploy" → DEPLOY_BLUE_ONE=true
-//     "attack"          → ACTION_ALL=ATTACK_MED
-//     "blue_one attack" → ACTION_BLUE_ONE=ATTACK_MED
-//     "blue_one atak"   → ATAK_MODE_BLUE_ONE=true
+//     "atak"               -> ATAK_MODE_ALL=true
+//     "blue_one atak"      -> ATAK_MODE_BLUE_ONE=true
+//     "resume"             -> ATAK_MODE_ALL=false
+//     "avoid off"          -> ATAK_AVOID_COLLISIONS_ALL=false
+//     "blue_one retry off" -> ATAK_RETRY_BLUE_ONE=false
+//     "attack"             -> ACTION_ALL=ATTACK_MED
+//     "blue_one attack"    -> ACTION_BLUE_ONE=ATTACK_MED
 //   Vehicle names must use underscores (blue_one, not blue one).
 //   play/stop are fleet-wide only (no vehicle prefix).
 //
 // fleet_mode = false  (VEHICLE MOOSDB):
-//   command_chatroom = $(VNAME)  (this vehicle's callsign)
-//   Posts bare variable names directly on this vehicle's MOOSDB.
-//   In ATAK, DM the vehicle callsign to send it commands.
-//   PREREQUISITE: pCoTBridge and pCoTChat must be running on the
-//   vehicle (already the case in wp_2025 meta_surveyor.moos).
+//   Posts bare variable names directly on the vehicle's MOOSDB.
+//   Chatroom = $(VNAME) -- operator DMs the vehicle callsign.
+//   Use plug_pCoTCommander.moos included from meta_surveyor.moos.
 //
-// ATAK MODE CONTROL
+// ATAK MODE
 // ------------------------------------------------------------------
-// "atak" chat command  → ATAK_MODE=true
-//   Game behaviors (attack/defend/loiter) condition on
-//   ATAK_MODE!=true and yield immediately. Vehicle holds
-//   its current position until a waypoint or "resume" arrives.
+// "atak" or any incoming waypoint -> ATAK_MODE=true
+//   Game behaviors yield (they condition on ATAK_MODE != true).
+//   Vehicle holds position until a waypoint or "resume" arrives.
 //
-// Sending a Go To waypoint from ATAK also enters ATAK mode:
-//   ATAK_MODE=true + ATAK_WAYPT_ACTIVE=true are posted together
-//   so the waypt_atak behavior fires on the same MOOSDB tick.
+// "resume" -> ATAK_MODE=false + ATAK_WAYPT_ACTIVE=false
+//   Game behaviors resume immediately on next helm tick.
 //
-// "resume" chat command → ATAK_MODE=false + ATAK_WAYPT_ACTIVE=false
-//   Game behaviors resume immediately on their next iterate tick.
+// "return", "station", "pause" also exit ATAK mode.
 //
-// "return", "station", "pause" also clear ATAK mode.
-//
-// ANTLER BLOCK ENTRY
+// BEHAVIOR TOGGLES (all default on, vehicle or fleet mode)
 // ------------------------------------------------------------------
-//   Run = pCoTCommander @ NewConsole = false
+//   avoid on|off  -> ATAK_AVOID_COLLISIONS = true|false
+//     Gates BHV_AvdColregsV22 and BHV_AvoidCollision in ATAK mode.
 //
-// Last updated: May 2026
-//------------------------------------------
+//   untag on|off  -> ATAK_AUTO_UNTAG = true|false
+//     on:  vehicle auto-returns home when tagged, then resumes waypoint
+//     off: vehicle ignores tags, stays on ATAK waypoint
+//
+//   retry on|off  -> ATAK_RETRY = true|false
+//     on:  after tag recovery waypt_atak reactivates automatically
+//     off: after tag recovery ATAK_WAYPT_ACTIVE is cleared; operator
+//          gets a DM and must send a new waypoint to continue
+//
+//   opreg on|off  -> ATAK_OPREG_RECOVER = true|false
+//     Gates BHV_OpRegionRecover (boundary enforcement) in ATAK mode.
+//     WARNING DM sent when turned off. Always active in auto mode.
+//
+// WAYPOINT INTERFACE
+// ------------------------------------------------------------------
+// In ATAK use "Send To <vehicle>" to target a specific boat.
+// TAK server routes b-m-p-w-GOTO only to that vehicle's pCoTBridge.
+// pCoTCommander converts lat/lon -> local XY and posts:
+//   ATAK_MODE         = true
+//   ATAK_WAYPT_ACTIVE = true
+//   ATAK_WPT_UPDATE   = points=x,y # capture_radius=r
+//
+// Rejection cases (DM sent explaining why):
+//   DEPLOY=false  -> "not deployed, send 'deploy' first"
+//   No GPS yet    -> "waiting for GPS fix"
+//   Bad CoT       -> "missing coordinates in GoTo"
+//
+// Required in meta_surveyor.bhv:
+//   initialize ATAK_MODE              = false
+//   initialize ATAK_WAYPT_ACTIVE      = false
+//   initialize ATAK_AVOID_COLLISIONS  = true
+//   initialize ATAK_AUTO_UNTAG        = true
+//   initialize ATAK_OPREG_RECOVER     = true
+//
+//   Behavior = BHV_Waypoint
+//   {
+//     name      = waypt_atak
+//     pwt       = 100            // recover (300) and colregs (300) dominate
+//     perpetual = true
+//     condition = ATAK_MODE = true
+//     condition = ATAK_WAYPT_ACTIVE = true
+//     condition = (TAGGED != true) or (ATAK_AUTO_UNTAG = false)
+//     updates   = ATAK_WPT_UPDATE
+//     endflag   = ATAK_WPT_REACHED = true
+//     speed          = 3.5
+//     capture_radius = 15.0
+//     slip_radius    = 30.0
+//     runflag = BOT_DIALOG_STATUS=ATAK Waypoint
+//   }
+//
+//   // All game behaviors must include:
+//   condition = ATAK_MODE != true
+//
+//   // common.bhv BHV_OpRegionRecover must include:
+//   condition = (ATAK_MODE = false) or (ATAK_OPREG_RECOVER = true)
+//
+//   // common.bhv BHV_AvdColregsV22 must include:
+//   condition = (ATAK_MODE = false) or (ATAK_AVOID_COLLISIONS = true)
+//
+// Last updated: May 2026 (updated)
+//------------------------------------------------------------------
 
 
 // ==================================================================
@@ -61,84 +115,36 @@
 
 ProcessConfig = pCoTCommander
 {
-  AppTick   = 4     // Iterate() fires only on new mail (COMMS_DRIVEN mode)
-  CommsTick = 10    // Keep high so COT_INBOUND and ATAK_CHAT_IN arrive quickly
+  AppTick   = 4     // COMMS_DRIVEN -- fires on new mail only
+  CommsTick = 10    // Keep high so COT_INBOUND arrives promptly
 
   // ---- Chat command interface ----
   // Operator DMs command_chatroom in ATAK. pCoTChat publishes it as
-  // ATAK_CHAT_IN; pCoTCommander dispatches it.
-  //
-  // fleet_mode=true: posts *_ALL variables routed by uFldShoreBroker.
-  //   command_chatroom must match SHORE_CALLSIGN in pCoTChat config.
-  //   Prefix any command with vehicle name (underscores) to target
-  //   one vehicle instead of the fleet:
-  //     "atak"          → ATAK_MODE_ALL=true
-  //     "blue_one atak" → ATAK_MODE_BLUE_ONE=true
-  //     "resume"        → ATAK_MODE_ALL=false + ATAK_WAYPT_ACTIVE_ALL=false
-  //     "attack"        → ACTION_ALL=ATTACK_MED
-  //   play/stop are fleet-wide only (no vehicle prefix).
-  //   Type "help" to get the full command list as a DM in ATAK.
+  // ATAK_CHAT_IN; pCoTCommander dispatches and confirms via DM.
+  // fleet_mode=true: posts *_ALL vars routed by uFldShoreBroker.
+  // Prefix any command with vehicle name (underscores) to target one.
   enable_chat_commands = true
-  command_chatroom     = AQUATICUS-SHORE   // must match SHORE_CALLSIGN in pCoTChat
+  command_chatroom     = AQUATICUS-SHORE   // must match SHORE_CALLSIGN
   fleet_mode           = true
 
   // ---- Waypoint control ----
-  // "Go To" command (b-m-p-w-GOTO) from ATAK:
-  //   1. Posts ATAK_MODE=true  (enter operator control)
-  //   2. Posts ATAK_WAYPT_ACTIVE=true  (activate waypt_atak behavior)
-  //   3. Posts ATAK_WPT_UPDATE="points=x,y # capture_radius=r"
-  //
-  // Requires in meta_surveyor.bhv:
-  //   initialize ATAK_MODE         = false
-  //   initialize ATAK_WAYPT_ACTIVE = false
-  //
-  //   Behavior = BHV_Waypoint
-  //   {
-  //     name      = waypt_atak
-  //     pwt       = 150
-  //     perpetual = true
-  //     condition = ATAK_MODE = true
-  //     condition = ATAK_WAYPT_ACTIVE = true
-  //     condition = TAGGED != true
-  //     updates   = ATAK_WPT_UPDATE
-  //     endflag   = ATAK_WPT_REACHED = true
-  //     ...
-  //   }
-  //
-  // All game behaviors (attack, defend, loiter) must include:
-  //   condition = ATAK_MODE != true
   enable_waypoint_control = true
   waypoint_update_var     = ATAK_WPT_UPDATE
-  capture_radius          = 15.0   // meters; overridden per-waypoint at runtime
+  capture_radius          = 15.0   // meters
 
-  // ---- Security ----
-  // Optional: restrict CoT commands to one specific ATAK device UID.
-  // Find UID in ATAK: Settings → About.
-  // Leave commented to accept from any connected device.
-  // operator_uid_filter = ANDROID-abc123def456
+  // Optional: restrict to one ATAK device UID.
+  // Find UID in ATAK: Settings -> About.
+  // operator_uid_filter = ANDROID-abc123
 
-  // ---- Geodesy ----
-  // Converts incoming ATAK lat/lon to MOOS-IvP local XY.
-  //   false (default): MOOSGeodesy UTM projection if available,
-  //                    falls back to NAV flat-earth anchor automatically.
-  //   true:            always use NAV flat-earth anchor from NODE_REPORT.
   use_nav_fallback = false
-
-  // ---- Debug ----
-  // false (default): AppCast shows counters and last command only.
-  // true:            verbose — every COT_INBOUND logged with type, uid,
-  //                  lat/lon, and dispatch decision. Useful for verifying
-  //                  ATAK targeting reaches only the intended vehicle
-  //                  (check that other vehicles show ignored counts, not
-  //                  handled counts, for the same test waypoint).
-  debug = false
+  debug            = false
 }
 
 
 // ==================================================================
 // VEHICLE (fleet_mode = false)
 // ==================================================================
-// Typically included via plug_pCoTCommander.moos from meta_surveyor.moos.
+// Use plug_pCoTCommander.moos rather than this block directly.
 // Shown here for reference.
 
 // ProcessConfig = pCoTCommander
@@ -146,11 +152,8 @@ ProcessConfig = pCoTCommander
 //   AppTick   = 4
 //   CommsTick = 10
 //
-//   // fleet_mode=false: posts directly on this vehicle's MOOSDB.
-//   // command_chatroom=$(VNAME): operator DMs the vehicle callsign
-//   // in ATAK (e.g. "blue_one") to target only this vehicle.
 //   fleet_mode           = false
-//   command_chatroom     = $(VNAME)
+//   command_chatroom     = $(VNAME)   // vehicle callsign
 //   enable_chat_commands = true
 //
 //   enable_waypoint_control = true
@@ -163,17 +166,21 @@ ProcessConfig = pCoTCommander
 //   debug            = false
 // }
 //
-// SUPPORTED CHAT COMMANDS (vehicle mode — DM the vehicle callsign):
-//   deploy          → DEPLOY=true + overrides
-//   return / rtb    → RETURN=true, ATAK_MODE=false, ATAK_WAYPT_ACTIVE=false
-//   station / hold  → STATION_KEEP=true, ATAK_MODE=false, ATAK_WAYPT_ACTIVE=false
-//   pause           → MOOS_MANUAL_OVERRIDE=true, ATAK_MODE=false, ATAK_WAYPT_ACTIVE=false
-//   atak            → ATAK_MODE=true (enter operator control)
-//   resume          → ATAK_MODE=false, ATAK_WAYPT_ACTIVE=false (back to strategy)
-//   status          → DM reply with deployment state
-//   attack          → ACTION=ATTACK_MED
-//   defend          → ACTION=DEFEND_MED
-//   attack easy     → ACTION=ATTACK_E
-//   defend easy     → ACTION=DEFEND_E
-//   help            → DM reply listing all commands
-//   (play/stop not available in vehicle mode — fleet-wide only)
+// VEHICLE CHAT COMMANDS (DM the vehicle callsign):
+//   deploy          -> DEPLOY=true + overrides
+//   return / rtb    -> RETURN=true, exits ATAK mode
+//   station / hold  -> STATION_KEEP=true, exits ATAK mode
+//   pause           -> MOOS_MANUAL_OVERRIDE=true, exits ATAK mode
+//   atak            -> ATAK_MODE=true (enter operator control)
+//   resume          -> ATAK_MODE=false (back to autonomous strategy)
+//   avoid on|off    -> ATAK_AVOID_COLLISIONS=true|false
+//   untag on|off    -> ATAK_AUTO_UNTAG=true|false
+//   retry on|off    -> ATAK_RETRY=true|false
+//   opreg on|off    -> ATAK_OPREG_RECOVER=true|false (warning on off)
+//   status          -> DM: deployment + ATAK state
+//   attack          -> ACTION=ATTACK_MED
+//   defend          -> ACTION=DEFEND_MED
+//   attack easy     -> ACTION=ATTACK_E
+//   defend easy     -> ACTION=DEFEND_E
+//   help            -> DM: vehicle command list
+//   (play/stop not available -- fleet-wide only via shoreside)
