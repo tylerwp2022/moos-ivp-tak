@@ -43,8 +43,7 @@
 /*                      ↓                                   */
 /*               pCoTCommander                              */
 /*                      ↓                                   */
-/*    CoT commands  → ATAK_MODE + ATAK_WAYPT_ACTIVE +       */
-/*                    ATAK_WPT_UPDATE                        */
+/*    CoT commands  → ATAK_ACTIVE + ATAK_WPT_UPDATE         */
 /*    Chat commands → DEPLOY[_ALL], RETURN[_ALL],           */
 /*                    STATION_KEEP[_ALL],                   */
 /*                    MOOS_MANUAL_OVERRIDE[_ALL],           */
@@ -53,32 +52,18 @@
 /*                                                          */
 /*  Handled CoT types:                                      */
 /*    b-m-p-w-GOTO → waypoint command                       */
-/*      Publishes: ATAK_MODE         = true                 */
-/*                 ATAK_WAYPT_ACTIVE = true                 */
+/*      Publishes: ATAK_ACTIVE = true                       */
 /*                 ATAK_WPT_UPDATE = points=x,y #           */
 /*                                   capture_radius=r       */
 /*      Requires waypt_atak behavior in .bhv with:          */
-/*        condition = ATAK_MODE = true                      */
-/*        condition = ATAK_WAYPT_ACTIVE = true              */
+/*        condition = ATAK_ACTIVE = true                    */
 /*        updates   = ATAK_WPT_UPDATE                       */
 /*                                                          */
 /*  Supported chat commands (via ATAK GeoChat):             */
 /*    deploy          → DEPLOY[_ALL]=true + overrides       */
 /*    return | rtb    → RETURN[_ALL]=true                   */
-/*                      ATAK_MODE[_ALL]=false               */
-/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
 /*    station | hold  → STATION_KEEP[_ALL]=true             */
-/*                      ATAK_MODE[_ALL]=false               */
-/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
 /*    pause           → MOOS_MANUAL_OVERRIDE[_ALL]=true     */
-/*                      ATAK_MODE[_ALL]=false               */
-/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
-/*    atak            → ATAK_MODE[_ALL]=true                */
-/*                      Enters operator control; game       */
-/*                      behaviors yield until "resume".     */
-/*    resume          → ATAK_MODE[_ALL]=false               */
-/*                      ATAK_WAYPT_ACTIVE[_ALL]=false       */
-/*                      Returns to autonomous strategy.     */
 /*    play            → AQUATICUS_GAME_ALL=play (fleet only)*/
 /*    stop            → AQUATICUS_GAME_ALL=pause (fleet only*/
 /*    status          → DM reply with deployment state      */
@@ -100,11 +85,7 @@
 /*                NODE_REPORT_LOCAL                         */
 /*                ATAK_WPT_REACHED (waypt endflag)          */
 /*                DEPLOY          (deployment state)        */
-/*                ATAK_MODE       (vehicle mode only —      */
-/*                  warns operator when attack/defend sent  */
-/*                  while game behaviors are suppressed)    */
-/*    Publishes:  ATAK_MODE     (bool string)               */
-/*                ATAK_WAYPT_ACTIVE (bool string)            */
+/*    Publishes:  ATAK_ACTIVE    (bool string)              */
 /*                ATAK_WPT_UPDATE (BHV_Waypoint update str) */
 /*                DEPLOY[_ALL], RETURN[_ALL],               */
 /*                STATION_KEEP[_ALL],                       */
@@ -165,8 +146,7 @@ protected:
 
   // b-m-p-w-GOTO — "Go To" waypoint from ATAK.
   // Converts lat/lon to local XY via CoTGeodesy and publishes
-  // ATAK_MODE=true + ATAK_WAYPT_ACTIVE=true + ATAK_WPT_UPDATE
-  // to pHelmIvP.
+  // ATAK_ACTIVE=true + ATAK_WPT_UPDATE to pHelmIvP.
   void handleWaypointCoT(const std::string& uid,
                           double lat, double lon,
                           const std::string& xml);
@@ -247,13 +227,16 @@ private:
   // Waypoints are rejected if the robot is not deployed.
   bool        m_deployed;
 
-  // Tracks the ATAK_MODE variable published on this vehicle's MOOSDB.
-  // Only subscribed and tracked in vehicle mode (fleet_mode=false) —
-  // the shore MOOSDB never holds a bare ATAK_MODE variable.
-  // Used to warn the operator when attack/defend commands are sent
-  // while the vehicle is in ATAK mode (game behaviors are suppressed,
-  // so the ACTION post would have no visible effect until resume).
+  // Vehicle-mode state tracking (fleet_mode=false only).
+  // m_atak_mode:  mirrors ATAK_MODE from MOOSDB; used to warn when
+  //               attack/defend commands are sent while suppressed.
+  // m_tagged:     mirrors TAGGED; used to detect untagged transitions
+  //               for the retry-off logic.
+  // m_atak_retry: mirrors ATAK_RETRY; true = resume waypoint after
+  //               being untagged, false = clear waypoint and hold.
   bool        m_atak_mode;
+  bool        m_tagged;
+  bool        m_atak_retry;
 
   // Guards against repeated "Waypoint reached" messages.
   // Set true after the first reached notification for a given

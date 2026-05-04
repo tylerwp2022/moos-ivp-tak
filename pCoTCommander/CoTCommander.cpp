@@ -41,6 +41,9 @@ CoTCommander::CoTCommander()
   m_last_wpt_lat         = 0.0;
   m_last_wpt_lon         = 0.0;
   m_deployed             = false;
+  m_atak_mode            = false;
+  m_tagged               = false;
+  m_atak_retry           = true;
   m_wpt_reached_sent     = false;
 }
 
@@ -226,6 +229,14 @@ void CoTCommander::registerVariables()
 
   // Track deployment state — waypoints rejected if not deployed
   Register("DEPLOY", 0);
+
+  // Vehicle mode only: track ATAK_MODE for attack/defend warning
+  // and TAGGED for retry transition detection.
+  // Shore MOOSDB never holds bare ATAK_MODE or TAGGED variables.
+  if(!m_fleet_mode) {
+    Register("ATAK_MODE", 0);
+    Register("TAGGED",    0);
+  }
 }
 
 
@@ -309,6 +320,42 @@ bool CoTCommander::OnNewMail(MOOSMSG_LIST &NewMail)
       setBooleanOnString(m_deployed, sval);
       if(m_deployed != prev)
         debugLog("OnNewMail: DEPLOY = " + boolToString(m_deployed));
+    }
+
+    // --------------------------------------------------------
+    // ATAK_MODE — track operator control state (vehicle mode).
+    // Used to warn when attack/defend sent while suppressed.
+    // --------------------------------------------------------
+    else if(key == "ATAK_MODE") {
+      bool prev = m_atak_mode;
+      setBooleanOnString(m_atak_mode, sval);
+      if(m_atak_mode != prev)
+        debugLog("OnNewMail: ATAK_MODE = " + boolToString(m_atak_mode));
+    }
+
+    // --------------------------------------------------------
+    // TAGGED — detect untagged transition for retry logic.
+    // When robot returns home (true→false) in ATAK mode with
+    // retry off, clear ATAK_WAYPT_ACTIVE so it holds position
+    // instead of immediately charging the same objective again.
+    // --------------------------------------------------------
+    else if(key == "TAGGED") {
+      bool prev_tagged = m_tagged;
+      setBooleanOnString(m_tagged, sval);
+      if(prev_tagged && !m_tagged && m_atak_mode && !m_atak_retry) {
+        Notify("ATAK_WAYPT_ACTIVE", string("false"));
+        string chat_dest = m_last_sender_callsign.empty()
+                           ? "All Chat Rooms"
+                           : m_last_sender_callsign;
+        Notify("ATAK_CHAT_OUT",
+               "message=Tagged and returned. Retry is off -- "
+               "send new waypoint to continue."
+               "|chatroom=" + chat_dest);
+        reportEvent("pCoTCommander: untagged in ATAK mode, retry off -- waypoint cleared");
+        debugLog("OnNewMail: TAGGED false -- retry off, ATAK_WAYPT_ACTIVE cleared");
+      }
+      else
+        debugLog("OnNewMail: TAGGED = " + boolToString(m_tagged));
     }
 
     else if(key == "ATAK_WPT_REACHED" && sval == "true") {
@@ -580,6 +627,13 @@ bool CoTCommander::buildReport()
          << "  debug=" << boolToString(m_debug) << endl;
   m_msgs << endl;
 
+  m_msgs << "State:   deployed=" << boolToString(m_deployed);
+  if(!m_fleet_mode)
+    m_msgs << "  atak_mode=" << boolToString(m_atak_mode)
+           << "  tagged="    << boolToString(m_tagged)
+           << "  retry="     << boolToString(m_atak_retry);
+  m_msgs << endl << endl;
+
   m_msgs << "COT_INBOUND: received=" << m_cot_received
          << "  handled=" << m_cot_handled
          << "  ignored=" << m_cot_ignored << endl;
@@ -697,7 +751,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
     static const set<string> cmd_keywords = {
       "deploy", "return", "rtb", "station", "hold", "pause",
       "play", "stop", "status", "attack", "defend", "help",
-      "atak", "resume", "avoid", "untag"
+      "atak", "resume", "avoid", "untag", "retry"
     };
 
     size_t space      = cmd.find(' ');
@@ -708,7 +762,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
       if(space == string::npos) {
         Notify("ATAK_CHAT_OUT",
                "message=Unknown command. Use: deploy, return, station, "
-               "pause, atak, resume, avoid on/off, untag on/off, "
+               "pause, atak, resume, avoid on/off, untag on/off, retry on/off, "
                "play, stop, status, attack, defend, or "
                "<vehicle> <command> (e.g. blue_one attack)."
                "|chatroom=" + reply_to);
@@ -891,6 +945,32 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
   // Help — list available commands
   // ========================================================
   // ========================================================
+  // Retry toggle — ATAK_RETRY
+  // ========================================================
+  // "retry on"  (default): after being tagged and returning home,
+  //   waypt_atak reactivates automatically and the robot resumes
+  //   the same objective. Good for persistent flag-grab attempts.
+  // "retry off": after returning home the waypoint is cleared.
+  //   Robot holds position in ATAK mode waiting for a new command.
+  //   Good when you want to reassess before committing again.
+  else if(cmd == "retry on" || cmd == "retry off") {
+    string val   = (cmd == "retry on") ? "true" : "false";
+    string state = (cmd == "retry on") ? "on" : "off";
+    Notify("ATAK_RETRY" + sfx, val);
+    // Track locally in vehicle mode for the untagged transition logic
+    if(!m_fleet_mode)
+      m_atak_retry = (cmd == "retry on");
+    Notify("ATAK_CHAT_OUT",
+           "message=Retry " + state + " for " + target + "."
+           "|chatroom=" + reply_to);
+    m_last_command  = "ATAK_RETRY" + sfx + "=" + val +
+                      " (from " + callsign + ")";
+    m_chat_commands++;
+    reportEvent("pCoTCommander: [CHAT] ATAK_RETRY" + sfx +
+                "=" + val + " from " + callsign);
+  }
+
+  // ========================================================
   // Collision avoidance toggle — ATAK_AVOID_COLLISIONS
   // ========================================================
   // "avoid on"  → true  (default): BHV_AvdColregsV22 and
@@ -955,7 +1035,8 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "attack easy     - ATTACK_E&#10;"
         "defend easy     - DEFEND_E&#10;"
         "avoid on/off    - collision avoidance&#10;"
-        "untag on/off    - auto-untag when tagged";
+        "untag on/off    - auto-untag when tagged&#10;"
+        "retry on/off    - retry waypoint after tag";
     } else {
       help_msg =
         "Commands (use underscores: blue_one, red_two):&#10;"
@@ -974,6 +1055,7 @@ void CoTCommander::handleChatCommand(const std::string& moos_val)
         "defend easy     - DEFEND_E (all)&#10;"
         "avoid on/off    - collision avoidance&#10;"
         "untag on/off    - auto-untag when tagged&#10;"
+        "retry on/off    - retry waypoint after tag&#10;"
         "vehicle cmd     - target one vehicle&#10;"
         "  e.g. blue_one attack, red_two deploy";
     }
