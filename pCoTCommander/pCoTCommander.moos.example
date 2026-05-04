@@ -136,6 +136,19 @@ ProcessConfig = pCoTCommander
   // Find UID in ATAK: Settings -> About.
   // operator_uid_filter = ANDROID-abc123
 
+  // ---- Flag pursuit ----
+  // flag_pursuit_enabled: set false to disable automatic pursuit.
+  //   Default true. Useful to disable during non-game testing.
+  // flag_uid: must match the uid pCoTGraphics publishes for the
+  //   red flag marker (default: aquaticus-flag-red).
+  // team_flag_vars: HAS_FLAG variable for each blue team member.
+  //   Pursuit stops when any goes true. These are published by
+  //   the Aquaticus game and must be shared to vehicle MOOSDBs
+  //   from shore via pShare (add to plug_pShare.moos on vehicle).
+  flag_pursuit_enabled = true
+  flag_uid             = aquaticus-flag-red
+  team_flag_vars       = HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
+
   use_nav_fallback = false
   debug            = false
 }

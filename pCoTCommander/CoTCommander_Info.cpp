@@ -52,6 +52,12 @@ void showSynopsis()
   blk("    Toggles: avoid on|off, untag on|off,                       ");
   blk("             retry on|off, opreg on|off                        ");
   blk("    Info:    status, help                                       ");
+  blk("                                                                ");
+  blk("  FLAG PURSUIT (vehicle mode only):                            ");
+  blk("  When b-m-p-s-m CoT with uid=flag_uid arrives, enters ATAK   ");
+  blk("  mode and navigates to the flag. Stops when any variable in   ");
+  blk("  team_flag_vars goes true. Config: flag_pursuit_enabled,      ");
+  blk("  flag_uid, team_flag_vars.                                    ");
 }
 
 void showHelpAndExit()
@@ -178,6 +184,13 @@ void showInterfaceAndExit()
   blk("  TAGGED            = true/false  (vehicle mode only --        ");
   blk("                      detects untagged transition for          ");
   blk("                      retry-off logic)                         ");
+  blk("  HAS_FLAG_*        = true/false  (vehicle mode only --        ");
+  blk("                      one per team member configured in        ");
+  blk("                      team_flag_vars, e.g. HAS_FLAG_BLUE_ONE.  ");
+  blk("                      Stops flag pursuit when any goes true.)  ");
+  blk("  b-m-p-s-m CoT     -- flag position marker (COT_INBOUND).     ");
+  blk("                      Dispatched by dispatchInboundCoT when    ");
+  blk("                      uid matches flag_uid config param.        ");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
@@ -226,6 +239,10 @@ void showInterfaceAndExit()
   blk("    Gates BHV_OpRegionRecover (field boundary) in ATAK mode.  ");
   blk("    WARNING DM sent when turned off.                           ");
   blk("    Always active outside ATAK mode regardless of setting.     ");
+  blk("  ATAK_FLAG_PURSUIT          = true|false                      ");
+  blk("    true while actively pursuing the flag. false when pursuit  ");
+  blk("    ends (flag secured by any teammate, or manual cancel via   ");
+  blk("    'resume'). Useful for external apps monitoring game state. ");
   blk("  ATAK_CHAT_OUT              = message=...|chatroom=<sender>   ");
   blk("    Confirmation DM to every command sender (success or error).");
   blk("    'help' sends mode-appropriate command list (vehicle mode   ");

@@ -45,6 +45,14 @@ CoTCommander::CoTCommander()
   m_tagged               = false;
   m_atak_retry           = true;
   m_wpt_reached_sent     = false;
+
+  // Flag pursuit defaults
+  m_flag_pursuit_enabled   = true;
+  m_flag_uid               = "aquaticus-flag-red";
+  m_flag_pursuit           = false;
+  m_flag_pursuit_notified  = false;
+  m_flag_last_lat          = 0.0;
+  m_flag_last_lon          = 0.0;
 }
 
 
@@ -358,6 +366,37 @@ bool CoTCommander::OnNewMail(MOOSMSG_LIST &NewMail)
         debugLog("OnNewMail: TAGGED = " + boolToString(m_tagged));
     }
 
+    // --------------------------------------------------------
+    // HAS_FLAG_* -- flag possession (vehicle mode).
+    // Stop pursuit when any blue team member grabs the flag.
+    // --------------------------------------------------------
+    else if(m_flag_pursuit) {
+      for(const string& var : m_team_flag_vars) {
+        if(key == var && sval == "true") {
+          // A teammate (or self) has the flag -- end pursuit
+          Notify("ATAK_WAYPT_ACTIVE",   string("false"));
+          Notify("ATAK_FLAG_PURSUIT",   string("false"));
+          m_flag_pursuit          = false;
+          m_flag_pursuit_notified = false;
+          // Determine who secured it for the DM
+          string holder = key; // e.g. HAS_FLAG_BLUE_ONE
+          string chat_dest = m_last_sender_callsign.empty()
+                             ? "All Chat Rooms"
+                             : m_last_sender_callsign;
+          Notify("ATAK_CHAT_OUT",
+                 "message=Flag secured (" + holder + " = true). "
+                 "Pursuit complete. In ATAK mode -- send waypoint "
+                 "or 'resume' to continue."
+                 "|chatroom=" + chat_dest);
+          reportEvent("pCoTCommander: flag secured by " + holder +
+                      " -- pursuit ended");
+          debugLog("OnNewMail: " + holder +
+                   " = true -- flag pursuit ended");
+          break;
+        }
+      }
+    }
+
     else if(key == "ATAK_WPT_REACHED" && sval == "true") {
       // Only send once per waypoint — perpetual=true causes the
       // behavior to re-complete every tick while idling at the
@@ -493,6 +532,23 @@ bool CoTCommander::dispatchInboundCoT(const std::string& xml)
     return true;
   }
 
+  // ---- b-m-p-s-m — spot marker, check for flag CoT ----
+  // Only handle in vehicle mode with pursuit enabled.
+  // Filter on m_flag_uid so other spot markers are ignored.
+  if(m_flag_pursuit_enabled && !m_fleet_mode &&
+     type == "b-m-p-s-m") {
+    string event_uid = extractAttr(xml, "uid");
+    if(event_uid == m_flag_uid) {
+      if(!lat_str.empty() && !lon_str.empty()) {
+        handleFlagCoT(uid, lat, lon, xml);
+        m_cot_handled++;
+        return true;
+      }
+      debugLog("dispatchInboundCoT: flag CoT missing lat/lon");
+      return false;
+    }
+  }
+
   // ---- Unhandled type — log and ignore ----
   // In debug mode this shows you what ATAK is sending so you
   // can decide whether to add a handler for it.
@@ -620,6 +676,94 @@ void CoTCommander::handleWaypointCoT(const std::string& uid,
 // buildReport()
 // ============================================================
 
+
+// ============================================================
+// handleFlagCoT()
+// ============================================================
+// Called when a b-m-p-s-m CoT with uid matching m_flag_uid is
+// received. Converts flag lat/lon to local XY and activates ATAK
+// mode with a waypoint targeting the flag position.
+//
+// Subsequent re-broadcasts of the same CoT silently update the
+// waypoint if position changes; no repeated DM is sent.
+//
+// Pursuit ends in OnNewMail when any variable in m_team_flag_vars
+// goes true. Vehicle stays in ATAK mode after securing the flag
+// so the operator can issue the next directive.
+// ============================================================
+
+void CoTCommander::handleFlagCoT(const string& uid,
+                                  double lat, double lon,
+                                  const string& xml)
+{
+  if(!m_deployed) {
+    debugLog("handleFlagCoT: not deployed -- ignoring");
+    return;
+  }
+
+  double x = 0.0, y = 0.0;
+  if(!m_geodesy.latLonToLocalXY(lat, lon, x, y)) {
+    reportRunWarning("pCoTCommander: flag CoT received but geodesy "
+                     "not ready -- cannot pursue flag yet");
+    debugLog("handleFlagCoT: geodesy not ready");
+    return;
+  }
+
+  // Check if position has changed enough to need a waypoint update.
+  // Flag is stationary in normal play; this prevents redundant
+  // MOOSDB posts on every re-broadcast of an identical CoT.
+  bool pos_changed = (fabs(lat - m_flag_last_lat) > FLAG_POS_THRESHOLD ||
+                      fabs(lon - m_flag_last_lon) > FLAG_POS_THRESHOLD);
+
+  if(!pos_changed && m_flag_pursuit) {
+    debugLog("handleFlagCoT: already pursuing, position unchanged");
+    return;
+  }
+
+  m_flag_last_lat = lat;
+  m_flag_last_lon = lon;
+
+  string update = "points="             + doubleToStringX(x, 2)
+                + ","                   + doubleToStringX(y, 2)
+                + " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
+
+  Notify("ATAK_MODE",           string("true"));
+  Notify("ATAK_WAYPT_ACTIVE",   string("true"));
+  Notify("ATAK_FLAG_PURSUIT",   string("true"));
+  Notify(m_waypoint_update_var, update);
+
+  m_flag_pursuit     = true;
+  m_wpt_reached_sent = false;
+
+  string lat_str = doubleToStringX(lat, 5);
+  string lon_str = doubleToStringX(lon, 5);
+
+  string chat_dest = m_last_sender_callsign.empty()
+                     ? "All Chat Rooms"
+                     : m_last_sender_callsign;
+
+  if(!m_flag_pursuit_notified) {
+    m_flag_pursuit_notified = true;
+    Notify("ATAK_CHAT_OUT",
+           "message=Pursuing red flag at " +
+           lat_str + ", " + lon_str + ". "
+           "Will stop when flag is secured by any teammate."
+           "|chatroom=" + chat_dest);
+    reportEvent("pCoTCommander: flag pursuit started -- " + update);
+  }
+  else if(pos_changed) {
+    reportEvent("pCoTCommander: flag position updated -- " + update);
+  }
+
+  m_last_command = "FLAG_PURSUIT lat=" + lat_str +
+                   " lon=" + lon_str +
+                   " x=" + doubleToStringX(x, 2) +
+                   " y=" + doubleToStringX(y, 2);
+  m_waypoint_commands++;
+  debugLog("handleFlagCoT: pursuit active -- " + update);
+}
+
+
 bool CoTCommander::buildReport()
 {
   m_msgs << "Geodesy: " << m_geodesy.getModeString()
@@ -628,10 +772,13 @@ bool CoTCommander::buildReport()
   m_msgs << endl;
 
   m_msgs << "State:   deployed=" << boolToString(m_deployed);
-  if(!m_fleet_mode)
-    m_msgs << "  atak_mode=" << boolToString(m_atak_mode)
-           << "  tagged="    << boolToString(m_tagged)
-           << "  retry="     << boolToString(m_atak_retry);
+  if(!m_fleet_mode) {
+    m_msgs << "  atak_mode="     << boolToString(m_atak_mode)
+           << "  tagged="        << boolToString(m_tagged)
+           << "  retry="         << boolToString(m_atak_retry);
+    if(m_flag_pursuit_enabled)
+      m_msgs << "  flag_pursuit=" << boolToString(m_flag_pursuit);
+  }
   m_msgs << endl << endl;
 
   m_msgs << "COT_INBOUND: received=" << m_cot_received

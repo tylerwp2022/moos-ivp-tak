@@ -149,6 +149,11 @@
 /*                DEPLOY           (deployment state)       */
 /*                ATAK_MODE        (vehicle mode only)      */
 /*                TAGGED           (vehicle mode only)      */
+/*                HAS_FLAG_*       (vehicle mode only --    */
+/*                  one per team member, e.g.               */
+/*                  HAS_FLAG_BLUE_ONE; configured via       */
+/*                  team_flag_vars. Stops flag pursuit when  */
+/*                  any goes true.)                          */
 /*    Publishes:  ATAK_MODE[_ALL]            bool           */
 /*                ATAK_WAYPT_ACTIVE[_ALL]    bool           */
 /*                ATAK_WPT_UPDATE            BHV update str */
@@ -162,6 +167,10 @@
 /*                MOOS_MANUAL_OVERRIDE[_ALL] bool           */
 /*                AQUATICUS_GAME_ALL         play|pause     */
 /*                ACTION[_<VEHICLE>]         role string    */
+/*                ATAK_FLAG_PURSUIT          bool           */
+/*                  true while actively pursuing the flag.  */
+/*                  false when pursuit ends (possession or  */
+/*                  manual cancel via resume).              */
 /*                ATAK_CHAT_OUT              DM to operator */
 /************************************************************/
 
@@ -222,6 +231,16 @@ protected:
   void handleWaypointCoT(const std::string& uid,
                           double lat, double lon,
                           const std::string& xml);
+
+  // b-m-p-s-m with uid matching flag_uid -- automatic flag pursuit.
+  // Activates ATAK mode and steers toward the flag position.
+  // Stops when any variable in team_flag_vars goes true (possession).
+  // Only runs in vehicle mode (fleet_mode=false) and when deployed.
+  // Re-broadcasts of the same flag CoT silently update the waypoint
+  // without repeating the operator DM.
+  void handleFlagCoT(const std::string& uid,
+                      double lat, double lon,
+                      const std::string& xml);
 
   // ATAK_CHAT_IN -- GeoChat command from operator.
   // Parses "callsign=X,chatroom=Y,message=Z", filters on
@@ -325,6 +344,42 @@ private:
   // the robot idles at the capture point.
   // Set true on first reached notification; reset on new waypoint.
   bool        m_wpt_reached_sent;
+
+  // --------------------------------------------------------
+  // Flag pursuit (vehicle mode only)
+  // --------------------------------------------------------
+
+  // Config: enable automatic pursuit of the red flag when
+  // its CoT is received. Default true. Set false to disable.
+  bool        m_flag_pursuit_enabled;
+
+  // Config: CoT UID of the red flag to pursue.
+  // Default: "aquaticus-flag-red"
+  std::string m_flag_uid;
+
+  // Config: list of MOOS variables indicating any teammate
+  // (including self) has possession of the flag.
+  // e.g. HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
+  // Must be shared to the vehicle MOOSDB from shore via pShare.
+  // Pursuit stops when any variable in this list goes true.
+  std::vector<std::string> m_team_flag_vars;
+
+  // Runtime: true while actively pursuing the flag.
+  bool        m_flag_pursuit;
+
+  // Suppresses repeated operator DMs when the flag CoT is
+  // re-broadcast by the TAK server. Reset when pursuit ends.
+  bool        m_flag_pursuit_notified;
+
+  // Last known flag position -- used to detect position changes
+  // and suppress redundant waypoint updates.
+  double      m_flag_last_lat;
+  double      m_flag_last_lon;
 };
+
+// Minimum flag position change (degrees) that triggers a waypoint
+// update. ~0.5m at Lake Popolopen latitude. Flag is stationary
+// in normal play; this guards against floating-point noise.
+static const double FLAG_POS_THRESHOLD = 0.000005;
 
 #endif // COT_COMMANDER_HEADER
