@@ -1,0 +1,51 @@
+//------------------------------------------------------------
+// plug_pCoTCommander_shore.moos
+//
+// nsplug fragment for the SHORESIDE pCoTCommander. Include
+// this in the shore-side launch configuration (typically
+// inside an Antler ProcessConfig block in the meta or main
+// .moos).
+//
+// Expected nsplug variables (defined upstream):
+//   $(SHORE_CALLSIGN)  -- shore's ATAK callsign / chatroom
+//                          name. Convention: "AQUATICUS-SHORE".
+//                          Shared with plug_pCoTShoreContact.moos
+//                          and plug_pCoTChat.moos as the single
+//                          source of truth for the shore UID.
+//   $(DEBUG_PCOTCMD)   -- optional, "true"/"false". Defaults
+//                          to "false" if unset.
+//
+// Loads the Aquaticus shore bundle:
+//   16 chat-only handlers (deploy, return, station, pause,
+//   atak, resume, avoid, opreg, attack, defend, play, stop,
+//   untag, retry, status, help). No CoT handlers -- the TAK
+//   server routes operator-targeted CoT directly to vehicles.
+//
+// REV: May 13, 2026 -- handler-class refactor
+//------------------------------------------------------------
+
+ProcessConfig = pCoTCommander
+{
+  AppTick   = 4
+  CommsTick = 4
+
+  // ---- Mode ----
+  fleet_mode       = true
+  mission          = aquaticus
+  // command_set omitted -- factory derives "shore" from
+  // fleet_mode = true. Set explicitly if you want belt-
+  // and-suspenders config validation.
+
+  // ---- Chat routing ----
+  command_chatroom = $(SHORE_CALLSIGN)
+  enable_chat_commands = true
+
+  // Optional substring filter on incoming CoT uid. Most
+  // shore deployments don't need this because the shore
+  // bundle has no CoT handlers anyway, but it's preserved
+  // for parity with vehicle config.
+  // operator_uid_filter = ANDROID
+
+  // ---- Diagnostics ----
+  debug = $(DEBUG_PCOTCMD=false)
+}

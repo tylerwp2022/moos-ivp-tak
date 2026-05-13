@@ -1,199 +1,214 @@
-//------------------------------------------------------------------
-// pCoTCommander_moos.example
+//------------------------------------------------------------
+// pCoTCommander.moos.example
 //
-// Example MOOS configuration for pCoTCommander.
-// Covers both fleet (shoreside) and vehicle modes.
+// Example standalone configuration for pCoTCommander after
+// the May 13, 2026 handler-class refactor.
 //
-// pCoTCommander translates operator commands from ATAK into MOOS
-// variable publications for pHelmIvP behaviors. It requires
-// pCoTBridge (publishes COT_INBOUND) and pCoTChat (publishes
-// ATAK_CHAT_IN) to be running on the same MOOSDB.
+// This file shows BOTH shoreside and vehicle modes side-by-
+// side. Production deployments should use the plug files
+// (plug_pCoTCommander_shore.moos / plug_pCoTCommander_vehicle.moos)
+// rather than copying this verbatim.
 //
-// TWO DEPLOYMENT MODES
-// ------------------------------------------------------------------
-// fleet_mode = true  (SHORESIDE MOOSDB):
-//   Posts *_ALL variables -- uFldShoreBroker routes to all vehicles.
-//   Chatroom = AQUATICUS-SHORE (must match SHORE_CALLSIGN in pCoTChat)
-//   Prefix any command with a vehicle name to target one vehicle:
-//     "atak"               -> ATAK_MODE_ALL=true
-//     "blue_one atak"      -> ATAK_MODE_BLUE_ONE=true
-//     "resume"             -> ATAK_MODE_ALL=false
-//     "avoid off"          -> ATAK_AVOID_COLLISIONS_ALL=false
-//     "blue_one retry off" -> ATAK_RETRY_BLUE_ONE=false
-//     "attack"             -> ACTION_ALL=ATTACK_MED
-//     "blue_one attack"    -> ACTION_BLUE_ONE=ATTACK_MED
-//   Vehicle names must use underscores (blue_one, not blue one).
-//   play/stop are fleet-wide only (no vehicle prefix).
+// Refactor notes:
+//   * fleet_mode + command_set decide which handler bundle
+//     loads. command_set is optional; if absent, it's
+//     derived from fleet_mode.
+//   * mission selects within a bundle; only "aquaticus" is
+//     registered today.
+//   * Handler-specific keys (capture_radius, flag_*, etc.)
+//     are consumed only by the handler that recognizes
+//     them; other handlers ignore unknown keys silently.
 //
-// fleet_mode = false  (VEHICLE MOOSDB):
-//   Posts bare variable names directly on the vehicle's MOOSDB.
-//   Chatroom = $(VNAME) -- operator DMs the vehicle callsign.
-//   Use plug_pCoTCommander.moos included from meta_surveyor.moos.
-//
-// ATAK MODE
-// ------------------------------------------------------------------
-// "atak" or any incoming waypoint -> ATAK_MODE=true
-//   Game behaviors yield (they condition on ATAK_MODE != true).
-//   Vehicle holds position until a waypoint or "resume" arrives.
-//
-// "resume" -> ATAK_MODE=false + ATAK_WAYPT_ACTIVE=false
-//   Game behaviors resume immediately on next helm tick.
-//
-// "return", "station", "pause" also exit ATAK mode.
-//
-// BEHAVIOR TOGGLES (all default on, vehicle or fleet mode)
-// ------------------------------------------------------------------
-//   avoid on|off  -> ATAK_AVOID_COLLISIONS = true|false
-//     Gates BHV_AvdColregsV22 and BHV_AvoidCollision in ATAK mode.
-//
-//   untag on|off  -> ATAK_AUTO_UNTAG = true|false
-//     on:  vehicle auto-returns home when tagged, then resumes waypoint
-//     off: vehicle ignores tags, stays on ATAK waypoint
-//
-//   retry on|off  -> ATAK_RETRY = true|false
-//     on:  after tag recovery waypt_atak reactivates automatically
-//     off: after tag recovery ATAK_WAYPT_ACTIVE is cleared; operator
-//          gets a DM and must send a new waypoint to continue
-//
-//   opreg on|off  -> ATAK_OPREG_RECOVER = true|false
-//     Gates BHV_OpRegionRecover (boundary enforcement) in ATAK mode.
-//     WARNING DM sent when turned off. Always active in auto mode.
-//
-// WAYPOINT INTERFACE
-// ------------------------------------------------------------------
-// In ATAK use "Send To <vehicle>" to target a specific boat.
-// TAK server routes b-m-p-w-GOTO only to that vehicle's pCoTBridge.
-// pCoTCommander converts lat/lon -> local XY and posts:
-//   ATAK_MODE         = true
-//   ATAK_WAYPT_ACTIVE = true
-//   ATAK_WPT_UPDATE   = points=x,y # capture_radius=r
-//
-// Rejection cases (DM sent explaining why):
-//   DEPLOY=false  -> "not deployed, send 'deploy' first"
-//   No GPS yet    -> "waiting for GPS fix"
-//   Bad CoT       -> "missing coordinates in GoTo"
-//
-// Required in meta_surveyor.bhv:
-//   initialize ATAK_MODE              = false
-//   initialize ATAK_WAYPT_ACTIVE      = false
-//   initialize ATAK_AVOID_COLLISIONS  = true
-//   initialize ATAK_AUTO_UNTAG        = true
-//   initialize ATAK_OPREG_RECOVER     = true
-//
-//   Behavior = BHV_Waypoint
-//   {
-//     name      = waypt_atak
-//     pwt       = 100            // recover (300) and colregs (300) dominate
-//     perpetual = true
-//     condition = ATAK_MODE = true
-//     condition = ATAK_WAYPT_ACTIVE = true
-//     condition = (TAGGED != true) or (ATAK_AUTO_UNTAG = false)
-//     updates   = ATAK_WPT_UPDATE
-//     endflag   = ATAK_WPT_REACHED = true
-//     speed          = 3.5
-//     capture_radius = 15.0
-//     slip_radius    = 30.0
-//     runflag = BOT_DIALOG_STATUS=ATAK Waypoint
-//   }
-//
-//   // All game behaviors must include:
-//   condition = ATAK_MODE != true
-//
-//   // common.bhv BHV_OpRegionRecover must include:
-//   condition = (ATAK_MODE = false) or (ATAK_OPREG_RECOVER = true)
-//
-//   // common.bhv BHV_AvdColregsV22 must include:
-//   condition = (ATAK_MODE = false) or (ATAK_AVOID_COLLISIONS = true)
-//
-// Last updated: May 2026 (updated)
-//------------------------------------------------------------------
+// REV: May 13, 2026 -- handler-class refactor
+//------------------------------------------------------------
 
+ServerHost = localhost
+ServerPort = 9000
+Community  = shoreside
 
-// ==================================================================
-// SHORESIDE (fleet_mode = true)
-// ==================================================================
+LatOrigin   = 41.34928
+LongOrigin  = -74.063645
 
-ProcessConfig = pCoTCommander
+//------------------------------------------------------------
+// Antler launch -- shore configuration shown
+//------------------------------------------------------------
+ProcessConfig = ANTLER
 {
-  AppTick   = 4     // COMMS_DRIVEN -- fires on new mail only
-  CommsTick = 10    // Keep high so COT_INBOUND arrives promptly
+  MSBetweenLaunches = 200
 
-  // ---- Chat command interface ----
-  // Operator DMs command_chatroom in ATAK. pCoTChat publishes it as
-  // ATAK_CHAT_IN; pCoTCommander dispatches and confirms via DM.
-  // fleet_mode=true: posts *_ALL vars routed by uFldShoreBroker.
-  // Prefix any command with vehicle name (underscores) to target one.
-  enable_chat_commands = true
-  command_chatroom     = AQUATICUS-SHORE   // must match SHORE_CALLSIGN
-  fleet_mode           = true
-
-  // ---- Waypoint control ----
-  enable_waypoint_control = true
-  waypoint_update_var     = ATAK_WPT_UPDATE
-  capture_radius          = 15.0   // meters
-
-  // Optional: restrict to one ATAK device UID.
-  // Find UID in ATAK: Settings -> About.
-  // operator_uid_filter = ANDROID-abc123
-
-  // ---- Flag pursuit ----
-  // flag_pursuit_enabled: set false to disable automatic pursuit.
-  //   Default true. Useful to disable during non-game testing.
-  // flag_uid: must match the uid pCoTGraphics publishes for the
-  //   red flag marker (default: aquaticus-flag-red).
-  // team_flag_vars: HAS_FLAG variable for each blue team member.
-  //   Pursuit stops when any goes true. These are published by
-  //   the Aquaticus game and must be shared to vehicle MOOSDBs
-  //   from shore via pShare (add to plug_pShare.moos on vehicle).
-  flag_pursuit_enabled = true
-  flag_uid             = aquaticus-flag-red
-  team_flag_vars       = HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
-
-  use_nav_fallback = false
-  debug            = false
+  Run = MOOSDB         @ NewConsole = false
+  Run = pCoTCommander  @ NewConsole = false
+  Run = pCoTBridge     @ NewConsole = false
+  Run = pCoTChat       @ NewConsole = false
 }
 
 
-// ==================================================================
-// VEHICLE (fleet_mode = false)
-// ==================================================================
-// Use plug_pCoTCommander.moos rather than this block directly.
-// Shown here for reference.
+//============================================================
+// pCoTCommander -- SHORE mode
+//============================================================
+//
+// Shore-mode dispatcher publishes commands to *_ALL
+// variables that uFldShoreBroker fans out to vehicle DBs.
+// Loads the Aquaticus shore bundle: 16 chat-only handlers,
+// no CoT handlers (TAK server routes operator-targeted CoT
+// directly to vehicles).
+//
+ProcessConfig = pCoTCommander
+{
+  AppTick   = 4
+  CommsTick = 4
 
+  //----------------------------------------------------------
+  // Dispatcher mode
+  //----------------------------------------------------------
+
+  // true  -> shoreside fleet dispatcher (publishes ACTION_ALL,
+  //          AQUATICUS_GAME_ALL, etc.)
+  // false -> per-vehicle dispatcher (publishes bare ACTION,
+  //          activates waypt_atak, etc.)
+  fleet_mode = true
+
+  // OPTIONAL. Which handler bundle to load. If omitted, the
+  // factory derives this from fleet_mode (true -> "shore",
+  // false -> "vehicle"). Valid values:
+  //   shore   -- Aquaticus shore bundle (16 chat-only handlers)
+  //   vehicle -- Aquaticus vehicle bundle (14 chat + 2 CoT)
+  //   custom  -- empty bundle; populate via enable_handler
+  //
+  // command_set = shore
+
+  // Mission within the selected command_set. Default:
+  // aquaticus. Future missions (e.g. hvt) would register
+  // their own bundles in CommandHandlerFactory.
+  mission = aquaticus
+
+  //----------------------------------------------------------
+  // Custom bundle (only honored when command_set = custom)
+  //----------------------------------------------------------
+  // Repeatable. Each entry adds one handler to the bundle
+  // by name. Order matters for CoT dispatch (first claim
+  // wins). HelpHandler should be last.
+  //
+  // Example -- minimal vehicle without flag pursuit:
+  //   command_set = custom
+  //   enable_handler = deploy
+  //   enable_handler = return
+  //   enable_handler = atak
+  //   enable_handler = resume
+  //   enable_handler = avoid
+  //   enable_handler = status
+  //   enable_handler = waypoint
+  //   enable_handler = help
+
+  //----------------------------------------------------------
+  // Chat routing
+  //----------------------------------------------------------
+
+  // ATAK chatroom this dispatcher listens to. Chat messages
+  // posted to ATAK_CHAT_IN with chatroom != this value are
+  // ignored. Used as the DM fallback destination by handlers
+  // that have no operator callsign to reply to.
+  command_chatroom = AQUATICUS-SHORE
+
+  // Optional substring filter on incoming CoT uid. When set,
+  // CoT events whose uid does NOT contain this substring are
+  // dropped before reaching handlers. Bypassed by handlers
+  // that override bypassOperatorFilter() (e.g. FlagPursuit
+  // accepting events from pCoTGraphics).
+  // operator_uid_filter = ANDROID
+
+  // Master switch for chat-command dispatch. CoT dispatch is
+  // unaffected. Default: true.
+  enable_chat_commands = true
+
+  //----------------------------------------------------------
+  // Geodesy
+  //----------------------------------------------------------
+
+  // Defaults to false. Set true to use NAV X/Y reports as a
+  // fallback when MOOSGeodesy isn't available.
+  // use_nav_fallback = false
+
+  //----------------------------------------------------------
+  // Diagnostics
+  //----------------------------------------------------------
+  debug = false
+
+  //----------------------------------------------------------
+  // Handler-specific config (consumed by the handlers that
+  // recognize each key; other handlers ignore silently)
+  //----------------------------------------------------------
+  //
+  // SHORE BUNDLE has neither WaypointHandler nor
+  // FlagPursuitHandler, so the following keys are unused
+  // in shore mode. Vehicle-mode example below shows them.
+}
+
+
+//============================================================
+// pCoTCommander -- VEHICLE mode (example for reference)
+//============================================================
+//
+// Each vehicle runs its own pCoTCommander against its local
+// MOOSDB. Loads the Aquaticus vehicle bundle: 14 chat + 2
+// CoT handlers (Waypoint and FlagPursuit).
+//
+// Uncomment and use ONE pCoTCommander block per process --
+// not both at once.
+//
 // ProcessConfig = pCoTCommander
 // {
 //   AppTick   = 4
-//   CommsTick = 10
+//   CommsTick = 4
 //
-//   fleet_mode           = false
-//   command_chatroom     = $(VNAME)   // vehicle callsign
+//   fleet_mode  = false
+//   mission     = aquaticus
+//
+//   // Vehicle's ATAK callsign. In the moos-ivp-tak
+//   // convention this is VNAME (role name, e.g. "blue_one"),
+//   // not the physical boat name.
+//   command_chatroom = blue_one
+//
 //   enable_chat_commands = true
+//   debug = false
 //
+//   //--------------------------------------------------------
+//   // WaypointHandler config (b-m-p-w-GOTO from ATAK)
+//   //--------------------------------------------------------
+//
+//   // BHV_Waypoint capture radius in meters. Default 15.
+//   capture_radius = 15.0
+//
+//   // MOOS variable that the waypt_atak behavior reads via
+//   // its 'updates = ...' line. Default: ATAK_WPT_UPDATE.
+//   waypoint_update_var = ATAK_WPT_UPDATE
+//
+//   // Master switch for waypoint dispatch. False disables
+//   // claimsCoT() in WaypointHandler -- the handler is
+//   // still loaded but never claims events. Default: true.
 //   enable_waypoint_control = true
-//   waypoint_update_var     = ATAK_WPT_UPDATE
-//   capture_radius          = 15.0
 //
-//   // operator_uid_filter = ANDROID-abc123
+//   //--------------------------------------------------------
+//   // FlagPursuitHandler config (b-m-p-s-m flag CoT)
+//   //--------------------------------------------------------
 //
-//   use_nav_fallback = false
-//   debug            = false
+//   flag_pursuit_enabled = true
+//
+//   // Exact CoT uid this handler matches on. The Aquaticus
+//   // referee broadcasts the opponent's flag with this uid.
+//   flag_uid = aquaticus-flag-red
+//
+//   // Lowercase. Belt-and-suspenders -- if the flag uid
+//   // contains this team name, skip it (we'd be chasing our
+//   // own flag).
+//   flag_my_team = blue
+//
+//   // Smaller than capture_radius so we drive INTO the
+//   // Aquaticus grab zone rather than stopping short.
+//   flag_capture_radius = 5.0
+//
+//   // Comma-separated. Handler subscribes to each. When ANY
+//   // goes true, a teammate has secured the flag and
+//   // pursuit ends.
+//   team_flag_vars = HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
 // }
-//
-// VEHICLE CHAT COMMANDS (DM the vehicle callsign):
-//   deploy          -> DEPLOY=true + overrides
-//   return / rtb    -> RETURN=true, exits ATAK mode
-//   station / hold  -> STATION_KEEP=true, exits ATAK mode
-//   pause           -> MOOS_MANUAL_OVERRIDE=true, exits ATAK mode
-//   atak            -> ATAK_MODE=true (enter operator control)
-//   resume          -> ATAK_MODE=false (back to autonomous strategy)
-//   avoid on|off    -> ATAK_AVOID_COLLISIONS=true|false
-//   untag on|off    -> ATAK_AUTO_UNTAG=true|false
-//   retry on|off    -> ATAK_RETRY=true|false
-//   opreg on|off    -> ATAK_OPREG_RECOVER=true|false (warning on off)
-//   status          -> DM: deployment + ATAK state
-//   attack          -> ACTION=ATTACK_MED
-//   defend          -> ACTION=DEFEND_MED
-//   attack easy     -> ACTION=ATTACK_E
-//   defend easy     -> ACTION=DEFEND_E
-//   help            -> DM: vehicle command list
-//   (play/stop not available -- fleet-wide only via shoreside)
