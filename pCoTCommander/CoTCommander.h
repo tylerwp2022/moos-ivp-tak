@@ -2,185 +2,119 @@
 /*    NAME: Tyler Errico                                    */
 /*    ORGN: West Point Robotics Research Center, USMA       */
 /*    FILE: CoTCommander.h                                  */
-/*    DATE: April 2026 (updated May 2026)                   */
+/*    DATE: April 2026                                      */
+/*    REV:  May 13, 2026 -- handler-class refactor          */
 /*                                                          */
 /*  pCoTCommander -- inbound CoT command dispatcher.        */
 /*                                                          */
-/*  Subscribes to COT_INBOUND (raw CoT XML published by     */
-/*  pCoTBridge) and ATAK_CHAT_IN (published by pCoTChat)    */
-/*  and translates operator commands from ATAK into MOOS    */
-/*  variable publications for pHelmIvP behaviors.           */
+/*  This is the slim dispatcher core. Per-command logic     */
+/*  lives in handlers/<Name>Handler.{h,cpp}, each of which  */
+/*  is a small class inheriting CoTCommandHandler. The      */
+/*  dispatcher owns no command-specific state; it only      */
+/*  routes events to handlers and mirrors common runtime    */
+/*  state into a CommanderContext that handlers can read.   */
 /*                                                          */
-/*  TWO DEPLOYMENT MODES                                    */
-/*  -------------------------------------------------------- */
-/*  fleet_mode = true  (runs on SHORESIDE MOOSDB):          */
-/*    command_chatroom = AQUATICUS-SHORE                     */
-/*    Chat commands post *_ALL variables, which             */
-/*    uFldShoreBroker routes to all vehicle communities.    */
-/*    Any command can be prefixed with a vehicle name to    */
-/*    target that vehicle instead of the whole fleet:       */
-/*      "deploy"          -> DEPLOY_ALL=true                */
-/*      "blue_one deploy" -> DEPLOY_BLUE_ONE=true           */
-/*      "attack"          -> ACTION_ALL=ATTACK_MED          */
-/*      "blue_one atak"   -> ATAK_MODE_BLUE_ONE=true        */
-/*    Vehicle names must use underscores (blue_one, not     */
-/*    blue one). The prefix works for all commands except   */
-/*    play/stop (fleet-wide only).                          */
+/*  See handlers/CoTCommandHandler.h for the handler        */
+/*  contract, dispatch flow details, and the lifecycle      */
+/*  hooks available to handlers.                            */
 /*                                                          */
-/*  fleet_mode = false (runs on VEHICLE MOOSDB):            */
-/*    command_chatroom = <vehicle callsign, e.g. blue_one>  */
-/*    Chat commands post bare variable names directly       */
-/*    on that vehicle's MOOSDB.                             */
-/*    PREREQUISITE: pCoTBridge and pCoTChat must be running */
-/*    on the vehicle (already present in meta_surveyor.moos)*/
+/*  =======================================================  */
+/*  DEPLOYMENT MODES                                        */
+/*  =======================================================  */
+/*  fleet_mode = true   -- runs on the shoreside MOOSDB,    */
+/*                          posts *_ALL variables.          */
+/*  fleet_mode = false  -- runs on a vehicle MOOSDB, posts  */
+/*                          bare variable names.            */
 /*                                                          */
-/*  Architecture:                                           */
-/*    TAK Server                                            */
-/*      | (TCP)                                             */
-/*    pCoTBridge -> COT_INBOUND                             */
-/*    pCoTChat   -> ATAK_CHAT_IN                            */
-/*                      |                                   */
-/*               pCoTCommander                              */
-/*                      |                                   */
-/*    CoT commands  -> ATAK_MODE, ATAK_WAYPT_ACTIVE,        */
-/*                     ATAK_WPT_UPDATE                      */
-/*    Chat commands -> DEPLOY[_ALL], RETURN[_ALL],          */
-/*                     STATION_KEEP[_ALL],                  */
-/*                     MOOS_MANUAL_OVERRIDE[_ALL],          */
-/*                     ATAK_MODE[_ALL],                     */
-/*                     ATAK_WAYPT_ACTIVE[_ALL],             */
-/*                     ATAK_AVOID_COLLISIONS[_ALL],         */
-/*                     ATAK_AUTO_UNTAG[_ALL],               */
-/*                     ATAK_RETRY[_ALL],                    */
-/*                     ATAK_OPREG_RECOVER[_ALL],            */
-/*                     AQUATICUS_GAME_ALL (fleet only),     */
-/*                     ACTION[_<VEHICLE>]                   */
+/*  The mode is exposed through CommanderContext::          */
+/*  fleet_mode -- handlers consult it when their behavior   */
+/*  differs across modes. Mode-exclusive commands (e.g.     */
+/*  play/stop which are shore-only) are realized by         */
+/*  excluding the handler from the wrong bundle in          */
+/*  CommandHandlerFactory, not by per-handler fleet_mode    */
+/*  checks.                                                 */
 /*                                                          */
-/*  ATAK MODE                                               */
-/*  -------------------------------------------------------- */
-/*  When ATAK_MODE=true, game behaviors (attack/defend/     */
-/*  loiter) yield because they condition on ATAK_MODE!=true.*/
-/*  The waypt_atak behavior (pwt=100) activates when both   */
-/*  ATAK_MODE=true and ATAK_WAYPT_ACTIVE=true.             */
-/*  BHV_OpRegionRecover (pwt=300) and BHV_AvdColregsV22    */
-/*  (pwt=300) are independently toggleable via chat.        */
-/*  ATAK mode is cleared by: resume, return, station, pause.*/
+/*  =======================================================  */
+/*  DISPATCH FLOW                                           */
+/*  =======================================================  */
+/*  OnNewMail():                                            */
+/*    COT_INBOUND      -> parseCoT into ParsedCoT           */
+/*                        -> apply cross-cutting filters    */
+/*                           (own-echo, operator UID)       */
+/*                        -> iterate m_handlers calling     */
+/*                           claimsCoT(); first claim wins  */
+/*                        -> handleCoT() on matched handler */
 /*                                                          */
-/*  Handled CoT types:                                      */
-/*    b-m-p-w-GOTO -> waypoint command                      */
-/*      Rejects if not deployed or geodesy not ready,       */
-/*      with a DM explanation to the operator in both cases.*/
-/*      On success publishes:                               */
-/*        ATAK_MODE         = true                          */
-/*        ATAK_WAYPT_ACTIVE = true                          */
-/*        ATAK_WPT_UPDATE   = points=x,y # capture_radius=r*/
-/*      Requires in meta_surveyor.bhv:                      */
-/*        name      = waypt_atak                            */
-/*        condition = ATAK_MODE = true                      */
-/*        condition = ATAK_WAYPT_ACTIVE = true              */
-/*        condition = (TAGGED != true) or                   */
-/*                    (ATAK_AUTO_UNTAG = false)             */
-/*        updates   = ATAK_WPT_UPDATE                       */
-/*        endflag   = ATAK_WPT_REACHED = true               */
+/*    ATAK_CHAT_IN     -> parse callsign/chatroom/message   */
+/*                        -> chatroom filter                */
+/*                        -> normalize cmd, resolve vehicle */
+/*                           prefix                         */
+/*                        -> m_chat_index lookup            */
+/*                        -> handleChat() on matched        */
+/*                           handler                        */
 /*                                                          */
-/*  Supported chat commands (via ATAK GeoChat):             */
-/*    -- Mode control --                                     */
-/*    atak            -> ATAK_MODE[_ALL]=true               */
-/*                       Suppresses game behaviors.         */
-/*    resume          -> ATAK_MODE[_ALL]=false              */
-/*                       ATAK_WAYPT_ACTIVE[_ALL]=false      */
-/*                       Restores game behaviors.           */
+/*    NODE_REPORT(*)   -> initialize geodesy on first one,  */
+/*                        update m_ctx.geodesy_ready flag.  */
 /*                                                          */
-/*    -- Fleet / deployment --                              */
-/*    deploy          -> DEPLOY[_ALL]=true + overrides      */
-/*    return | rtb    -> RETURN[_ALL]=true, exits ATAK mode */
-/*    station | hold  -> STATION_KEEP[_ALL]=true,           */
-/*                       exits ATAK mode                    */
-/*    pause           -> MOOS_MANUAL_OVERRIDE[_ALL]=true,   */
-/*                       exits ATAK mode                    */
-/*    play            -> AQUATICUS_GAME_ALL=play            */
-/*                       (fleet mode only)                  */
-/*    stop            -> AQUATICUS_GAME_ALL=pause           */
-/*                       (fleet mode only)                  */
+/*    DEPLOY, ATAK_MODE, TAGGED, ATAK_RETRY                 */
+/*                     -> mirror into m_ctx.                */
 /*                                                          */
-/*    -- ATAK behavior toggles (default all on) --          */
-/*    avoid on|off    -> ATAK_AVOID_COLLISIONS[_ALL]=t|f    */
-/*                       Gates BHV_AvdColregsV22 and        */
-/*                       BHV_AvoidCollision in ATAK mode.   */
-/*    untag on|off    -> ATAK_AUTO_UNTAG[_ALL]=t|f          */
-/*                       When off, vehicle ignores tags and  */
-/*                       stays on ATAK waypoint.            */
-/*    retry on|off    -> ATAK_RETRY[_ALL]=t|f               */
-/*                       When off, waypoint is cleared after */
-/*                       tag recovery; operator must resend. */
-/*    opreg on|off    -> ATAK_OPREG_RECOVER[_ALL]=t|f       */
-/*                       Gates BHV_OpRegionRecover in ATAK  */
-/*                       mode. Warning DM sent on opreg off.*/
+/*    (any other key registered by a handler)               */
+/*                     -> fan out to handler::onMail().     */
 /*                                                          */
-/*    -- Role assignment --                                  */
-/*    attack          -> ACTION[_ALL]=ATTACK_MED            */
-/*    attack easy     -> ACTION[_ALL]=ATTACK_E              */
-/*    defend          -> ACTION[_ALL]=DEFEND_MED            */
-/*    defend easy     -> ACTION[_ALL]=DEFEND_E              */
-/*    (warns if vehicle is in ATAK mode -- role takes effect */
-/*    only after resume)                                     */
+/*  =======================================================  */
+/*  STARTUP                                                 */
+/*  =======================================================  */
+/*  OnStartUp():                                            */
+/*    1. Read .moos ProcessConfig block; cache lines for    */
+/*       handler distribution.                              */
+/*    2. CommandHandlerFactory::build(command_set, mission, */
+/*       fleet_mode, custom_handlers) returns the handler   */
+/*       bundle, which is moved into m_handlers.            */
+/*    3. For each handler, replay configure(key,value)      */
+/*       over every cached line. Handlers consume what they */
+/*       recognize.                                         */
+/*    4. Build m_chat_index from each handler's             */
+/*       chatKeywords(). Fail fast with a clear error on    */
+/*       duplicate keys.                                    */
+/*    5. Aggregate registerSubs() across handlers; union    */
+/*       with the dispatcher's common subscriptions; call   */
+/*       Register() once.                                   */
+/*    6. Bind m_ctx callbacks (publish/dm/dlog lambdas      */
+/*       capturing this) and pointers.                      */
 /*                                                          */
-/*    -- Info --                                             */
-/*    status          -> DM: deployment + ATAK state        */
-/*    help            -> DM: mode-appropriate command list  */
-/*                       (vehicle mode omits fleet-only cmds*/
-/*    vehicle <cmd>   -> per-vehicle targeting (fleet mode) */
-/*                       e.g. "blue_one atak", "red_two avoid off" */
+/*  =======================================================  */
+/*  MOOS INTERFACE (unchanged from pre-refactor)            */
+/*  =======================================================  */
+/*    Subscribes (common, dispatcher-managed):              */
+/*      COT_INBOUND, ATAK_CHAT_IN, NODE_REPORT,             */
+/*      NODE_REPORT_LOCAL, DEPLOY, ATAK_MODE, TAGGED,       */
+/*      ATAK_RETRY, ATAK_WPT_REACHED                        */
+/*    Subscribes (per-handler):                             */
+/*      whatever each handler returns from registerSubs()   */
 /*                                                          */
-/*  All commands DM a confirmation or error back to sender. */
-/*  Operator always knows the outcome of every command.     */
-/*                                                          */
-/*  Adding new command types:                               */
-/*    CoT:  add a handler method + case in dispatchInboundCoT*/
-/*    Chat: add a branch in handleChatCommand()             */
-/*    No changes needed in pCoTBridge or pCoTChat           */
-/*                                                          */
-/*  MOOS Interface:                                         */
-/*    Subscribes: COT_INBOUND      (from pCoTBridge)        */
-/*                ATAK_CHAT_IN     (from pCoTChat)          */
-/*                NODE_REPORT      (geodesy NAV anchor)     */
-/*                NODE_REPORT_LOCAL                         */
-/*                ATAK_WPT_REACHED (waypt_atak endflag)     */
-/*                DEPLOY           (deployment state)       */
-/*                ATAK_MODE        (vehicle mode only)      */
-/*                TAGGED           (vehicle mode only)      */
-/*                HAS_FLAG_*       (vehicle mode only --    */
-/*                  one per team member, e.g.               */
-/*                  HAS_FLAG_BLUE_ONE; configured via       */
-/*                  team_flag_vars. Stops flag pursuit when  */
-/*                  any goes true.)                          */
-/*    Publishes:  ATAK_MODE[_ALL]            bool           */
-/*                ATAK_WAYPT_ACTIVE[_ALL]    bool           */
-/*                ATAK_WPT_UPDATE            BHV update str */
-/*                ATAK_AVOID_COLLISIONS[_ALL] bool          */
-/*                ATAK_AUTO_UNTAG[_ALL]      bool           */
-/*                ATAK_RETRY[_ALL]           bool           */
-/*                ATAK_OPREG_RECOVER[_ALL]   bool           */
-/*                DEPLOY[_ALL]               bool           */
-/*                RETURN[_ALL]               bool           */
-/*                STATION_KEEP[_ALL]         bool           */
-/*                MOOS_MANUAL_OVERRIDE[_ALL] bool           */
-/*                AQUATICUS_GAME_ALL         play|pause     */
-/*                ACTION[_<VEHICLE>]         role string    */
-/*                ATAK_FLAG_PURSUIT          bool           */
-/*                  true while actively pursuing the flag.  */
-/*                  false when pursuit ends (possession or  */
-/*                  manual cancel via resume).              */
-/*                ATAK_CHAT_OUT              DM to operator */
+/*    Publishes: Everything the active handlers publish --  */
+/*      see each handler's header for its outputs. Common   */
+/*      to all configurations: ATAK_CHAT_OUT (operator      */
+/*      DMs). The dispatcher itself publishes nothing.      */
 /************************************************************/
 
-#ifndef COT_COMMANDER_HEADER
-#define COT_COMMANDER_HEADER
+#ifndef MOOS_IVP_TAK_COT_COMMANDER_HEADER
+#define MOOS_IVP_TAK_COT_COMMANDER_HEADER
 
-#include <string>
 #include <deque>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "MOOS/libMOOS/Thirdparty/AppCasting/AppCastingMOOSApp.h"
+
 #include "CoTGeodesy.h"
+#include "CommanderContext.h"
+#include "ParsedCoT.h"
+#include "ChatMessage.h"
+#include "handlers/CoTCommandHandler.h"
 
 class CoTCommander : public AppCastingMOOSApp
 {
@@ -188,212 +122,197 @@ public:
   CoTCommander();
   virtual ~CoTCommander() {}
 
-  bool OnNewMail(MOOSMSG_LIST &NewMail);
+  // ========================================================
+  // MOOS lifecycle
+  // ========================================================
+  bool OnNewMail(MOOSMSG_LIST& NewMail);
   bool Iterate();
   bool OnConnectToServer();
   bool OnStartUp();
   bool buildReport();
 
 protected:
+  // ========================================================
+  // Startup helpers
+  // ========================================================
+
+  // Parse the .moos ProcessConfig block:
+  //   - Capture dispatcher-level config (fleet_mode,
+  //     command_chatroom, operator_uid_filter, command_set,
+  //     debug, enable_chat_commands).
+  //   - Fan every line out to each handler's configure().
+  // The dispatcher-level config and the configure() fan-
+  // out are both performed inline in OnStartUp().
+
+  // Wire the m_ctx callbacks (publish, dm, dlog, help_lines)
+  // and copy mode/chatroom/geodesy pointer into m_ctx. Called
+  // once during OnStartUp() after handlers are built.
+  void bindContext();
+
+  // Build the chat keyword index. Iterates m_handlers,
+  // pulls each handler's chatKeywords(), and inserts
+  // (keyword -> handler*) entries. Returns false and emits
+  // a clear error message on duplicate keyword claims --
+  // we fail at startup rather than letting silent mis-
+  // dispatch ship.
+  bool buildChatIndex();
+
+  // Aggregate handler::registerSubs() across the registry,
+  // union with the dispatcher's common subscription set,
+  // and call MOOS Register() for the result.
   void registerVariables();
+
+  // ========================================================
+  // Mail dispatch
+  // ========================================================
+
+  // Parse a COT_INBOUND XML payload into a ParsedCoT,
+  // apply cross-cutting filters (own-echo suppression,
+  // operator-UID filter respecting bypass overrides),
+  // then offer the event to handlers via
+  // claimsCoT()/handleCoT(). Updates m_cot_received /
+  // m_cot_handled / m_cot_ignored counters.
+  void dispatchInboundCoT(const std::string& xml);
+
+  // Parse an ATAK_CHAT_IN payload, verify chatroom against
+  // m_command_chatroom, normalize and trim, resolve the
+  // vehicle prefix (fleet mode only), look up the resulting
+  // first_word in m_chat_index, and call handleChat() on
+  // the matched handler. Unknown keywords get a DM listing
+  // valid commands.
+  void dispatchChatCommand(const std::string& moos_val);
+
+  // Initialize geodesy LatOrigin/LonOrigin from the first
+  // NODE_REPORT seen. Subsequent reports are ignored -- the
+  // origin is fixed for the run. Updates m_ctx.geodesy and
+  // m_ctx.geodesy_ready on success.
+  void updateGeodesy(const std::string& node_report);
+
+  // ========================================================
+  // Chat helpers
+  // ========================================================
+  //
+  // Vehicle-prefix resolution ("blue_one attack" -> attack
+  // targeted at blue_one) is performed inline inside
+  // dispatchChatCommand(). It uses m_chat_index to decide
+  // whether the first word is a known keyword (-> use as
+  // command) or unknown (-> treat as a vehicle name in
+  // fleet mode, fall through to unknown-command DM in
+  // vehicle mode).
+
+  // ========================================================
+  // Misc
+  // ========================================================
+
+  // Push a line into the debug circular buffer. Visible in
+  // AppCast when m_debug == true. Bound into m_ctx.dlog
+  // for handler use.
   void debugLog(const std::string& msg);
 
-  // --------------------------------------------------------
-  // CoT parsing utilities
-  //
-  // extractAttr() is a lightweight attribute extractor for
-  // CoT XML. CoT is simple enough that a full XML parser is
-  // not needed -- attribute scanning avoids a libxml2 dep.
-  // --------------------------------------------------------
-
-  // Extract a named attribute value from a CoT XML string.
-  // Handles both single and double quoted attribute values.
-  // Example:
-  //   extractAttr("<event uid=\"foo\" type=\"bar\">", "uid") -> "foo"
-  std::string extractAttr(const std::string& xml,
-                           const std::string& attr);
-
-  // Dispatch a received CoT event to the appropriate handler.
-  // Returns true if the event was handled (known type).
-  bool dispatchInboundCoT(const std::string& xml);
-
-  // --------------------------------------------------------
-  // Command handlers
-  //
-  // Each handler corresponds to one CoT type or family.
-  // Add new handlers here as new command types are needed.
-  // --------------------------------------------------------
-
-  // b-m-p-w-GOTO -- "Go To" waypoint from ATAK.
-  // Converts lat/lon to local XY via CoTGeodesy and publishes
-  // ATAK_MODE=true + ATAK_WAYPT_ACTIVE=true + ATAK_WPT_UPDATE.
-  // DMs rejection reason if not deployed or geodesy not ready.
-  void handleWaypointCoT(const std::string& uid,
-                          double lat, double lon,
-                          const std::string& xml);
-
-  // b-m-p-s-m with uid matching flag_uid -- automatic flag pursuit.
-  // Activates ATAK mode and steers toward the flag position.
-  // Stops when any variable in team_flag_vars goes true (possession).
-  // Only runs in vehicle mode (fleet_mode=false) and when deployed.
-  // Re-broadcasts of the same flag CoT silently update the waypoint
-  // without repeating the operator DM.
-  void handleFlagCoT(const std::string& uid,
-                      double lat, double lon,
-                      const std::string& xml);
-
-  // ATAK_CHAT_IN -- GeoChat command from operator.
-  // Parses "callsign=X,chatroom=Y,message=Z", filters on
-  // command_chatroom, dispatches to the appropriate handler.
-  // Every command DMs a confirmation or error back to sender.
-  void handleChatCommand(const std::string& moos_val);
-
 private:
-  // --------------------------------------------------------
-  // Geodesy -- LatLon -> local XY for waypoint conversion
-  // --------------------------------------------------------
-  CoTGeodesy  m_geodesy;
-  bool        m_geodesy_initialized;
+  // ========================================================
+  // Handler registry
+  // ========================================================
 
-  // --------------------------------------------------------
-  // Config
-  // --------------------------------------------------------
+  // Owned handlers. Order is the order in which
+  // CommandHandlerFactory added them; CoT dispatch
+  // iterates in this order (first claimsCoT() true wins).
+  std::vector<std::unique_ptr<CoTCommandHandler>> m_handlers;
 
-  // MOOS variable name for the BHV_Waypoint update string.
-  // Must match 'updates = ATAK_WPT_UPDATE' in waypt_atak .bhv
-  std::string m_waypoint_update_var;  // default: ATAK_WPT_UPDATE
+  // Keyword -> handler* lookup index for chat dispatch.
+  // Built once at OnStartUp from each handler's
+  // chatKeywords(). Pointers are NON-OWNING -- m_handlers
+  // owns the lifetime, this map is just a lookup view.
+  std::map<std::string, CoTCommandHandler*> m_chat_index;
 
-  // How close (meters) the robot must get to capture the waypoint.
-  // Sent in the WPT_UPDATE string as "capture_radius=r".
-  double m_capture_radius;            // default: 15.0 m
+  // ========================================================
+  // Shared services exposed to handlers via DI
+  // ========================================================
 
-  // Optional: only accept CoT commands from this ATAK device UID.
-  // Leave empty to accept from any connected ATAK client.
-  std::string m_operator_uid_filter;
+  // The dispatcher-owned LatLon<->XY converter. m_ctx.geodesy
+  // points to this once initialized.
+  CoTGeodesy m_geodesy;
+  bool       m_geodesy_initialized;
 
-  // Whether to enable each command type
-  bool m_enable_waypoint_control;
+  // DI bundle passed to handlers by reference. Lambdas
+  // capturing 'this' are bound to m_ctx.publish/dm/dlog
+  // in OnStartUp. Mirrored state (deployed, atak_mode,
+  // tagged, atak_retry) is updated by the dispatcher's
+  // OnNewMail and read by handlers.
+  CommanderContext m_ctx;
 
-  // --------------------------------------------------------
-  // Chat command config
-  // --------------------------------------------------------
+  // ========================================================
+  // Dispatcher-level config (.moos ProcessConfig)
+  // ========================================================
 
-  // Enable/disable the ATAK_CHAT_IN command interface.
-  bool        m_enable_chat_commands;
+  // Which bundle of handlers to instantiate. Recognized
+  // values: "shore", "vehicle", "custom". If unset,
+  // defaults to "shore" when fleet_mode = true, else
+  // "vehicle". Custom mode lets the operator enumerate
+  // handlers explicitly via enable_handler = <name> lines
+  // (handled by CommandHandlerFactory).
+  std::string m_command_set;
 
-  // Only process chat messages directed to this chatroom.
-  // Fleet mode:   shore callsign (e.g. "AQUATICUS-SHORE")
-  // Vehicle mode: vehicle callsign (e.g. "blue_one" = $(VNAME))
+  // Which mission's handler set to use. Recognized values:
+  // "aquaticus" (default), "hvt" (future). Affects which
+  // mission-specific handlers appear in the bundle, and
+  // which concrete class is built for mission-overloaded
+  // names like "attack" (e.g. aquaticus::AttackHandler vs.
+  // hvt::AttackHandler).
+  std::string m_mission;
+
+  // True on shoreside MOOSDB, false on a vehicle MOOSDB.
+  // Mirrored into m_ctx.fleet_mode for handlers.
+  bool m_fleet_mode;
+
+  // Only process chat messages whose chatroom field equals
+  // this string. Fleet mode: shore callsign (e.g.
+  // "AQUATICUS-SHORE"). Vehicle mode: vehicle callsign
+  // ($(VNAME)).
   std::string m_command_chatroom;
 
-  // Fleet mode:   post *_ALL vars -- uFldShoreBroker routes them.
-  // Vehicle mode: post bare variable names directly on own MOOSDB.
-  bool        m_fleet_mode;
+  // Optional substring filter on CoT event uid. Empty
+  // string disables the filter. Applied as a cross-cutting
+  // check in dispatchInboundCoT() before any handler sees
+  // the event, EXCEPT for handlers that override
+  // bypassOperatorFilter() to return true.
+  std::string m_operator_uid_filter;
 
+  // Master switch for chat command processing. When false,
+  // ATAK_CHAT_IN is still received but immediately dropped.
+  // Equivalent to building a bundle with no chat handlers,
+  // but cheaper to toggle in .moos for debugging.
+  bool m_enable_chat_commands;
+
+  // Master debug switch. When true, debugLog() entries are
+  // exposed in AppCast and handlers' dlog() calls become
+  // visible. When false, dlog() still appends to the
+  // circular buffer (cheap) but the buffer is not rendered.
   bool m_debug;
 
-  // --------------------------------------------------------
-  // Debug message circular buffer
-  // --------------------------------------------------------
+  // ========================================================
+  // Debug circular buffer
+  // ========================================================
+
   static const int DEBUG_BUF_SIZE = 8;
   std::deque<std::string> m_debug_msgs;
 
-  // --------------------------------------------------------
-  // Diagnostics
-  // --------------------------------------------------------
+  // ========================================================
+  // Aggregate diagnostics
+  // ========================================================
+
   unsigned int m_cot_received;
-  unsigned int m_cot_handled;
-  unsigned int m_cot_ignored;
-  unsigned int m_waypoint_commands;
-  unsigned int m_chat_commands;
-  std::string  m_last_command;  // last command for AppCast
+  unsigned int m_cot_handled;   // a handler claimed and processed
+  unsigned int m_cot_ignored;   // no handler claimed, or filter dropped
 
-  // Last waypoint sender -- for acknowledgment DMs
-  std::string m_last_sender_callsign;
-  double      m_last_wpt_lat;
-  double      m_last_wpt_lon;
+  unsigned int m_chat_received;
+  unsigned int m_chat_handled;  // keyword matched a handler
+  unsigned int m_chat_unknown;  // no handler keyword matched
 
-  // --------------------------------------------------------
-  // Runtime state
-  // --------------------------------------------------------
-
-  // Deployment state -- tracked from DEPLOY MOOS variable.
-  // Waypoints are rejected with a DM if not deployed.
-  bool        m_deployed;
-
-  // Vehicle-mode state tracking (fleet_mode=false only).
-  // Registered from MOOSDB so these mirror actual behavior state.
-  //
-  // m_atak_mode:  mirrors ATAK_MODE; used to warn when attack/
-  //   defend sent while game behaviors are suppressed.
-  //
-  // m_tagged:     mirrors TAGGED; used to detect the untagged
-  //   transition (true->false) for retry-off logic: when the
-  //   robot returns home after being tagged, ATAK_WAYPT_ACTIVE
-  //   is cleared if m_atak_retry=false so the robot holds
-  //   position rather than immediately retrying the objective.
-  //
-  // m_atak_retry: local copy of ATAK_RETRY; true = resume
-  //   waypoint automatically after being untagged (default),
-  //   false = clear waypoint and wait for operator to resend.
-  bool        m_atak_mode;
-  bool        m_tagged;
-  bool        m_atak_retry;
-
-  // Guards against repeated "Waypoint reached" messages while
-  // the robot idles at the capture point.
-  // Set true on first reached notification; reset on new waypoint.
-  bool        m_wpt_reached_sent;
-
-  // --------------------------------------------------------
-  // Flag pursuit (vehicle mode only)
-  // --------------------------------------------------------
-
-  // Config: enable automatic pursuit of the red flag when
-  // its CoT is received. Default true. Set false to disable.
-  bool        m_flag_pursuit_enabled;
-
-  // Config: CoT UID of the red flag to pursue.
-  // Default: "aquaticus-flag-red"
-  std::string m_flag_uid;
-
-  // Config: this vehicle's own team name (lowercase), e.g. "blue".
-  // Set to $(VTEAM) in the plug file. If the flag_uid contains this
-  // string, the flag CoT is skipped (it's our own flag, not the
-  // opponent's). Prevents red robots from pursuing their own flag
-  // when all vehicles share the same plug file.
-  // Leave empty to disable team filtering.
-  std::string m_flag_my_team;
-
-  // Config: capture radius used for flag pursuit waypoints.
-  // Smaller than m_capture_radius (15m) so the robot drives
-  // into the Aquaticus grab zone rather than stopping short.
-  // Default: 5.0m. Set to match the game grab zone radius.
-  double      m_flag_capture_radius;
-
-  // Config: list of MOOS variables indicating any teammate
-  // (including self) has possession of the flag.
-  // e.g. HAS_FLAG_BLUE_ONE,HAS_FLAG_BLUE_TWO,HAS_FLAG_BLUE_THREE
-  // Must be shared to the vehicle MOOSDB from shore via pShare.
-  // Pursuit stops when any variable in this list goes true.
-  std::vector<std::string> m_team_flag_vars;
-
-  // Runtime: true while actively pursuing the flag.
-  bool        m_flag_pursuit;
-
-  // Suppresses repeated operator DMs when the flag CoT is
-  // re-broadcast by the TAK server. Reset when pursuit ends.
-  bool        m_flag_pursuit_notified;
-
-  // Last known flag position -- used to detect position changes
-  // and suppress redundant waypoint updates.
-  double      m_flag_last_lat;
-  double      m_flag_last_lon;
+  // Last successful dispatch summary for AppCast.
+  // Format: "<handler name>: <short description>"
+  // Updated after each successful CoT or chat dispatch.
+  std::string m_last_dispatch;
 };
 
-// Minimum flag position change (degrees) that triggers a waypoint
-// update. ~0.5m at Lake Popolopen latitude. Flag is stationary
-// in normal play; this guards against floating-point noise.
-static const double FLAG_POS_THRESHOLD = 0.000005;
-
-#endif // COT_COMMANDER_HEADER
+#endif // MOOS_IVP_TAK_COT_COMMANDER_HEADER

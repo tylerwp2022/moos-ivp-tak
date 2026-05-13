@@ -1,0 +1,88 @@
+/************************************************************/
+/*    NAME: Tyler Errico                                    */
+/*    ORGN: West Point Robotics Research Center, USMA       */
+/*    FILE: PauseHandler.cpp                                */
+/*    DATE: May 13, 2026                                    */
+/************************************************************/
+
+#include <string>
+
+#include "PauseHandler.h"
+
+namespace common {
+
+PauseHandler::PauseHandler()
+  : m_count(0),
+    m_reject_count(0)
+{}
+
+
+// ============================================================
+// chatKeywords()
+// ============================================================
+
+std::vector<std::string> PauseHandler::chatKeywords() const
+{
+  return { "pause" };
+}
+
+
+std::string PauseHandler::helpLine() const
+{
+  return "pause             -- manual override on, vehicle stops";
+}
+
+
+// ============================================================
+// handleChat()
+// ============================================================
+//
+// Faithful port of the "pause" branch in the pre-refactor
+// CoTCommander::handleChatCommand().
+
+bool PauseHandler::handleChat(const ChatMessage& msg,
+                               CommanderContext& ctx)
+{
+  if(msg.cmd != "pause") {
+    ctx.dm("Usage: pause   (no arguments). Got: \"" +
+           msg.cmd + "\"", msg.reply_to);
+    m_reject_count++;
+    return false;
+  }
+
+  // Halt sequence: un-deploy + manual override on.
+  ctx.publish("DEPLOY"               + msg.sfx, "false");
+  ctx.publish("MOOS_MANUAL_OVERRIDE" + msg.sfx, "true");
+
+  // Exit ATAK mode -- ATAK_WAYPT_ACTIVE should not carry
+  // across an unpause cycle, and we don't want the
+  // previous waypoint reasserting itself when the operator
+  // re-deploys.
+  ctx.publish("ATAK_MODE"         + msg.sfx, "false");
+  ctx.publish("ATAK_WAYPT_ACTIVE" + msg.sfx, "false");
+
+  // Preserve pre-refactor DM phrasing.
+  std::string subject = (msg.sfx == "_ALL") ? "All vehicles"
+                                            : msg.target_label;
+  ctx.dm(subject + " paused.", msg.reply_to);
+
+  // Diagnostics
+  m_count++;
+  m_last_pause = msg.target_label;
+  if(!msg.callsign.empty())
+    m_last_pause += " (from " + msg.callsign + ")";
+
+  ctx.dlog("PauseHandler: MOOS_MANUAL_OVERRIDE" + msg.sfx + "=true");
+  return true;
+}
+
+
+void PauseHandler::appcast(std::string& report) const
+{
+  report += "  Sent:       " + std::to_string(m_count) + "\n";
+  report += "  Rejected:   " + std::to_string(m_reject_count) + "\n";
+  if(!m_last_pause.empty())
+    report += "  Last:       " + m_last_pause + "\n";
+}
+
+} // namespace common
