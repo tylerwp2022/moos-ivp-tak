@@ -17,6 +17,7 @@
 
 #include "MBUtils.h"           // doubleToStringX
 #include "CoTGeodesy.h"        // ctx.geodesy methods
+#include "MOOS/libMOOS/Utils/MOOSGenLibGlobalHelper.h"  // MOOSTime
 
 #include "WaypointHandler.h"
 #include "../../CoTUtils.h"    // cot::extractAttr
@@ -496,7 +497,7 @@ void WaypointHandler::onMail(const std::string& key,
     // PRECISE / HOLD: enter pending state, station-keep
     // while waiting for sustained settlement.
     m_post_capture_pending    = true;
-    m_post_capture_start_time = ctx.now();
+    m_post_capture_start_time = MOOSTime();
 
     // Reset the helm-side endflag so pHelmIvP doesn't see it
     // latched. The bhv will likely re-post it next iterate
@@ -532,11 +533,11 @@ void WaypointHandler::onMail(const std::string& key,
       // Boat is currently slow. Either start or check timer.
       if(m_low_speed_start_time < 0.0) {
         // First sub-threshold sample since last reset.
-        m_low_speed_start_time = ctx.now();
+        m_low_speed_start_time = MOOSTime();
         ctx.dlog("WaypointHandler: low-speed timer started at "
                  + doubleToStringX(m_last_speed, 3) + " m/s");
       } else {
-        double low_elapsed = ctx.now() - m_low_speed_start_time;
+        double low_elapsed = MOOSTime() - m_low_speed_start_time;
         if(low_elapsed >= m_settle_duration) {
           // SETTLED.
           //   precise: deactivate bhv, DM, return to idle.
@@ -583,7 +584,7 @@ void WaypointHandler::onMail(const std::string& key,
     // sustaining a settled period, release anyway. Prevents
     // the handler from getting stuck if wind or current
     // keeps the boat in continuous motion.
-    double total_elapsed = ctx.now() - m_post_capture_start_time;
+    double total_elapsed = MOOSTime() - m_post_capture_start_time;
     if(total_elapsed > m_post_capture_timeout) {
       ctx.publish("ATAK_WAYPT_ACTIVE",       "false");
       ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "false");
