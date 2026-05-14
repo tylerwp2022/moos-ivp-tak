@@ -140,6 +140,13 @@ bool FlagPursuitHandler::handleCoT(const ParsedCoT& evt,
   ctx.publish("ATAK_MODE",            "true");
   ctx.publish("ATAK_WAYPT_ACTIVE",    "true");
   ctx.publish("ATAK_FLAG_PURSUIT",    "true");
+  // Vehicle-side bare _STATE mirrors. uFldNodeBroker bridges
+  // these up to shore as ATAK_*_STATE_<VNAME_UPPER>. Without
+  // this, an auto-fired flag pursuit would be invisible to
+  // shore-side status queries.
+  ctx.publish("ATAK_MODE_STATE",         "true");
+  ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "true");
+  ctx.publish("ATAK_FLAG_PURSUIT_STATE", "true");
   ctx.publish(m_waypoint_update_var,  update);
 
   // DM destination preference:
@@ -260,6 +267,10 @@ void FlagPursuitHandler::onMail(const std::string& key,
   ctx.publish("ATAK_FLAG_PURSUIT", "false");
   ctx.publish("ATAK_WAYPT_ACTIVE", "false");
   ctx.publish("ATAK_MODE",         "false");
+  // Ground-truth mirrors (see pursuit-start comment).
+  ctx.publish("ATAK_FLAG_PURSUIT_STATE", "false");
+  ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "false");
+  ctx.publish("ATAK_MODE_STATE",         "false");
 
   std::string chat_dest = ctx.last_operator_callsign.empty()
                           ? ctx.command_chatroom

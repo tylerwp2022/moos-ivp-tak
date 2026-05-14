@@ -48,6 +48,9 @@ bool ResumeHandler::handleChat(const ChatMessage& msg,
 
   ctx.publish("ATAK_MODE"         + msg.sfx, "false");
   ctx.publish("ATAK_WAYPT_ACTIVE" + msg.sfx, "false");
+  // Ground-truth mirrors (see AtakHandler comment).
+  ctx.publish("ATAK_MODE_STATE"         + msg.sfx, "false");
+  ctx.publish("ATAK_WAYPT_ACTIVE_STATE" + msg.sfx, "false");
 
   // Preserve pre-refactor DM phrasing.
   std::string subject = (msg.sfx == "_ALL") ? "All vehicles"

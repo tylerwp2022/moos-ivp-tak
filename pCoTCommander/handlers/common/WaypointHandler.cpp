@@ -121,6 +121,13 @@ bool WaypointHandler::handleCoT(const ParsedCoT& evt,
 
   ctx.publish("ATAK_MODE",            "true");
   ctx.publish("ATAK_WAYPT_ACTIVE",    "true");
+  // Vehicle-side bare _STATE mirrors. uFldNodeBroker bridges
+  // these up to shore as ATAK_*_STATE_<VNAME_UPPER>, where
+  // shore StatusHandler reads them per-vehicle. Without this,
+  // operator-driven Go-To events on this vehicle would be
+  // invisible to shore-side status queries by other operators.
+  ctx.publish("ATAK_MODE_STATE",         "true");
+  ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "true");
   ctx.publish(m_waypoint_update_var,  update);
 
   // ----------------------------------------------------------

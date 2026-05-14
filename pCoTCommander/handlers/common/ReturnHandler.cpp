@@ -70,6 +70,9 @@ bool ReturnHandler::handleChat(const ChatMessage& msg,
   // behavior.
   ctx.publish("ATAK_MODE"         + msg.sfx, "false");
   ctx.publish("ATAK_WAYPT_ACTIVE" + msg.sfx, "false");
+  // Ground-truth mirrors (see AtakHandler comment).
+  ctx.publish("ATAK_MODE_STATE"         + msg.sfx, "false");
+  ctx.publish("ATAK_WAYPT_ACTIVE_STATE" + msg.sfx, "false");
 
   // Preserve pre-refactor DM phrasing: "All vehicles" is
   // capitalized when sfx == _ALL; vehicle and per-vehicle

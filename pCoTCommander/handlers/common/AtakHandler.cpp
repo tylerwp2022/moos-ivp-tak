@@ -53,6 +53,10 @@ bool AtakHandler::handleChat(const ChatMessage& msg,
   }
 
   ctx.publish("ATAK_MODE" + msg.sfx, "true");
+  // Ground-truth mirror -- same shore variable that vehicle
+  // bridges write to via _STATE bridge. Last writer wins
+  // (chat command wins over vehicle echo if simultaneous).
+  ctx.publish("ATAK_MODE_STATE" + msg.sfx, "true");
 
   // Preserve pre-refactor DM phrasing -- capitalized "All
   // vehicles" for sfx==_ALL, target_label otherwise.
