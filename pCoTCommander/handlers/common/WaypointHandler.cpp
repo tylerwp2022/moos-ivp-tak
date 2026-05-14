@@ -17,7 +17,7 @@
 
 #include "MBUtils.h"           // doubleToStringX
 #include "CoTGeodesy.h"        // ctx.geodesy methods
-#include "MOOS/libMOOS/Utils/MOOSGenLibGlobalHelper.h"  // MOOSTime
+#include "MOOS/libMOOS/Utils/MOOSUtilityFunctions.h"  // MOOSTime
 
 #include "WaypointHandler.h"
 #include "../../CoTUtils.h"    // cot::extractAttr
