@@ -24,6 +24,7 @@
 #include "handlers/common/OpregHandler.h"
 #include "handlers/common/StatusHandler.h"
 #include "handlers/common/WaypointHandler.h"
+#include "handlers/common/WptModeHandler.h"
 #include "handlers/common/HelpHandler.h"
 
 // ---- aquaticus/ handlers -----------------------------------
@@ -63,6 +64,7 @@ CommandHandlerFactory::buildOne(const std::string& name,
   if(name == "opreg")     return std::unique_ptr<CoTCommandHandler>(new common::OpregHandler());
   if(name == "status")    return std::unique_ptr<CoTCommandHandler>(new common::StatusHandler());
   if(name == "waypoint")  return std::unique_ptr<CoTCommandHandler>(new common::WaypointHandler());
+  if(name == "wpt_mode")  return std::unique_ptr<CoTCommandHandler>(new common::WptModeHandler());
   if(name == "help")      return std::unique_ptr<CoTCommandHandler>(new common::HelpHandler());
 
   // ---- Mission-specific handlers ----
@@ -131,7 +133,7 @@ CommandHandlerFactory::buildAquaticusShoreBundle()
     "attack", "defend",
     "play",   "stop",        // shore-only game state
     "untag",  "retry",
-    "status",
+    "status", "wpt_mode",
     "help"                   // last
   };
 
@@ -149,9 +151,10 @@ CommandHandlerFactory::buildAquaticusShoreBundle()
 // Aquaticus vehicle bundle
 // ============================================================
 //
-// 16 handlers: same 14 chat handlers as shore (minus
-// play/stop which are shore-only), plus WaypointHandler
-// (common, CoT) and FlagPursuitHandler (aquaticus, CoT).
+// 17 handlers: same 15 chat handlers as shore (minus
+// play/stop which are shore-only, plus wpt_mode), plus
+// WaypointHandler (common, CoT) and FlagPursuitHandler
+// (aquaticus, CoT).
 
 std::vector<std::unique_ptr<CoTCommandHandler>>
 CommandHandlerFactory::buildAquaticusVehicleBundle()
@@ -162,7 +165,7 @@ CommandHandlerFactory::buildAquaticusVehicleBundle()
     "avoid",  "opreg",
     "attack", "defend",
     "untag",  "retry",
-    "status",
+    "status", "wpt_mode",
     "waypoint",     // common, CoT
     "flag_pursuit", // aquaticus, CoT
     "help"          // last

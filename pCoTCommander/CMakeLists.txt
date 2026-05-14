@@ -42,6 +42,7 @@ SET(SRC
   handlers/common/OpregHandler.cpp
   handlers/common/StatusHandler.cpp
   handlers/common/WaypointHandler.cpp
+  handlers/common/WptModeHandler.cpp
   handlers/common/HelpHandler.cpp
 
   # aquaticus/ handlers (Aquaticus CTF-specific)

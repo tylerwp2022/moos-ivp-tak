@@ -9,6 +9,9 @@
 /*  pre-refactor code.                                      */
 /************************************************************/
 
+#include <algorithm>    // std::transform
+#include <cctype>       // std::tolower
+#include <cmath>        // sqrt for approach distance
 #include <cstdlib>      // atof
 #include <string>
 
@@ -20,6 +23,17 @@
 
 namespace common {
 
+namespace {
+// File-local helper. Lowercase a copy of the input.
+std::string toLowerStr(const std::string& s)
+{
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(),
+                 [](unsigned char c){ return std::tolower(c); });
+  return out;
+}
+} // anonymous
+
 WaypointHandler::WaypointHandler()
   : m_capture_radius(15.0),
     m_waypoint_update_var("ATAK_WPT_UPDATE"),
@@ -27,15 +41,100 @@ WaypointHandler::WaypointHandler()
     m_speed_stop_threshold(0.1),
     m_settle_duration(3.0),
     m_post_capture_timeout(30.0),
+    m_default_mode("fast"),
+    m_default_speed(2.0),
+    m_precise_approach_speed(1.0),
+    m_approach_buffer(5.0),
     m_wpt_reached_sent(false),
     m_post_capture_pending(false),
     m_post_capture_start_time(0.0),
     m_low_speed_start_time(-1.0),
     m_last_speed(0.0),
+    m_nav_x(0.0),
+    m_nav_y(0.0),
+    m_nav_valid(false),
+    m_current_mode("fast"),
+    m_target_x(0.0),
+    m_target_y(0.0),
+    m_approach_slowdown_applied(false),
     m_count(0),
     m_rejected_not_deployed(0),
     m_rejected_no_geodesy(0)
 {}
+
+
+// ============================================================
+// extractModeOverride() -- search remarks for per-shot tag
+// ============================================================
+//
+// Pulls the body of <remarks>...</remarks> from the CoT XML
+// and searches for "fast" / "precise" / "hold" tokens (case-
+// insensitive, optional leading '#'). Returns the matched
+// mode string or empty.
+//
+// We don't use cot::extractAttr() because remarks is an
+// element body, not an attribute. Hand-rolled substring
+// search keeps the dependency surface flat.
+
+std::string WaypointHandler::extractModeOverride(const std::string& raw_xml) const
+{
+  // Find <remarks ...>BODY</remarks>. The remarks element
+  // may have attributes (source, time, etc.) so we look for
+  // the closing '>' of the opening tag.
+  size_t open_start = raw_xml.find("<remarks");
+  if(open_start == std::string::npos) return "";
+  size_t open_end = raw_xml.find('>', open_start);
+  if(open_end == std::string::npos) return "";
+  size_t close_start = raw_xml.find("</remarks>", open_end);
+  if(close_start == std::string::npos) return "";
+
+  std::string body = raw_xml.substr(open_end + 1,
+                                     close_start - open_end - 1);
+  std::string lower = toLowerStr(body);
+
+  // Order matters: check "precise" before "fast" so "fastest"
+  // (contains "fast") doesn't false-match. Currently no other
+  // substrings collide but the order is defensive.
+  if(lower.find("precise") != std::string::npos) return "precise";
+  if(lower.find("hold")    != std::string::npos) return "hold";
+  if(lower.find("fast")    != std::string::npos) return "fast";
+  return "";
+}
+
+
+// ============================================================
+// resolveMode() -- effective mode for a given CoT
+// ============================================================
+//
+// Priority order: per-shot CoT override > sticky WPT_MODE >
+// default from config.
+
+std::string WaypointHandler::resolveMode(const std::string& raw_xml) const
+{
+  std::string override_mode = extractModeOverride(raw_xml);
+  if(!override_mode.empty()) return override_mode;
+  if(!m_current_mode.empty()) return m_current_mode;
+  return m_default_mode;
+}
+
+
+// ============================================================
+// buildUpdate() -- format ATAK_WPT_UPDATE string
+// ============================================================
+//
+// Per BHV_Waypoint docs: "points=X,Y # speed=S # capture_radius=R"
+// is a valid dynamic update. The '#' separator yields a list
+// of behavior-parameter overrides for the next iterate.
+
+std::string WaypointHandler::buildUpdate(double x,
+                                          double y,
+                                          double speed) const
+{
+  return "points="            + doubleToStringX(x, 2) +
+         ","                  + doubleToStringX(y, 2) +
+         " # speed="          + doubleToStringX(speed, 2) +
+         " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
+}
 
 
 // ============================================================
@@ -114,23 +213,33 @@ bool WaypointHandler::handleCoT(const ParsedCoT& evt,
   if(!sender.empty())
     ctx.last_operator_callsign = sender;
 
-  // New waypoint -> reset both phase latches AND the low-
-  // speed timer so the next capture fires a fresh phase 1
-  // -> phase 2 sequence. If the operator sends a new
-  // waypoint while we're still in post-capture pending state
-  // (boat hasn't fully settled yet), the new mission takes
+  // ----------------------------------------------------------
+  // Resolve effective mode (per-shot override > sticky >
+  // default). Store as m_active_mode so the rest of the
+  // mission (capture, settle, release) knows which path to
+  // take.
+  // ----------------------------------------------------------
+  m_active_mode = resolveMode(evt.raw_xml);
+
+  // New waypoint -> reset every phase latch AND remember the
+  // target XY for approach-distance calculation. If the
+  // operator sends a new waypoint while we're still in
+  // post-capture pending state, the new mission takes
   // priority -- we abandon the old one's settlement tracking.
-  m_wpt_reached_sent      = false;
-  m_post_capture_pending  = false;
-  m_low_speed_start_time  = -1.0;
+  m_wpt_reached_sent          = false;
+  m_post_capture_pending      = false;
+  m_low_speed_start_time      = -1.0;
+  m_target_x                  = x;
+  m_target_y                  = y;
+  m_approach_slowdown_applied = false;
 
   // ----------------------------------------------------------
   // Build the BHV_Waypoint update line and publish the
-  // activation trio.
+  // activation trio. Initial speed is the cruise default
+  // regardless of mode -- approach slowdown (precise/hold)
+  // republishes a lower speed later when within range.
   // ----------------------------------------------------------
-  std::string update = "points="            + doubleToStringX(x, 2) +
-                       ","                  + doubleToStringX(y, 2) +
-                       " # capture_radius=" + doubleToStringX(m_capture_radius, 1);
+  std::string update = buildUpdate(x, y, m_default_speed);
 
   ctx.publish("ATAK_MODE",            "true");
   ctx.publish("ATAK_WAYPT_ACTIVE",    "true");
@@ -144,22 +253,26 @@ bool WaypointHandler::handleCoT(const ParsedCoT& evt,
   ctx.publish(m_waypoint_update_var,  update);
 
   // ----------------------------------------------------------
-  // Acknowledgment DM with the lat/lon. ATAK clients use
-  // this to confirm the boat got the order.
+  // Acknowledgment DM with the lat/lon and active mode. ATAK
+  // clients use this to confirm the boat got the order; the
+  // mode tag tells the operator how the boat will behave at
+  // the destination.
   // ----------------------------------------------------------
   std::string lat_str = doubleToStringX(evt.lat, 5);
   std::string lon_str = doubleToStringX(evt.lon, 5);
-  ctx.dm("ATAK mode active. Moving to " + lat_str + ", " + lon_str + ".",
+  ctx.dm("ATAK [" + m_active_mode + "]. Moving to " +
+         lat_str + ", " + lon_str + ".",
          chat_dest);
 
   m_count++;
   m_last_waypoint = lat_str + "," + lon_str +
                     " -> " + doubleToStringX(x, 2) + "," +
                              doubleToStringX(y, 2) +
+                    "  mode=" + m_active_mode +
                     "  sender=" + chat_dest;
 
   ctx.dlog("WaypointHandler: " + m_waypoint_update_var + "=" + update +
-           " sender=" + chat_dest);
+           " mode=" + m_active_mode + " sender=" + chat_dest);
   return true;
 }
 
@@ -200,6 +313,27 @@ void WaypointHandler::configure(const std::string& key,
     double v = atof(value.c_str());
     if(v > 0.0) m_post_capture_timeout = v;
   }
+  else if(k == "default_wpt_mode") {
+    std::string lv = toLowerStr(value);
+    if(lv == "fast" || lv == "precise" || lv == "hold") {
+      m_default_mode = lv;
+      m_current_mode = lv;   // until WPT_MODE mail overrides
+    }
+  }
+  else if(k == "default_speed") {
+    double v = atof(value.c_str());
+    if(v > 0.0) m_default_speed = v;
+  }
+  else if(k == "precise_approach_speed") {
+    double v = atof(value.c_str());
+    if(v > 0.0) m_precise_approach_speed = v;
+  }
+  else if(k == "approach_buffer") {
+    double v = atof(value.c_str());
+    // Allow 0 (slowdown engages exactly at capture_radius)
+    // but not negative.
+    if(v >= 0.0) m_approach_buffer = v;
+  }
   // Unknown keys are silently ignored -- other handlers may
   // own them.
 }
@@ -220,6 +354,9 @@ void WaypointHandler::registerSubs(std::vector<std::string>& subs)
 {
   subs.push_back("ATAK_WPT_REACHED");
   subs.push_back("NAV_SPEED");
+  subs.push_back("NAV_X");
+  subs.push_back("NAV_Y");
+  subs.push_back("WPT_MODE");
 }
 
 
@@ -256,6 +393,71 @@ void WaypointHandler::onMail(const std::string& key,
                               CommanderContext& ctx)
 {
   // --------------------------------------------------------
+  // WPT_MODE: sticky mode update from WptModeHandler.
+  // Persists across waypoints. Per-shot CoT remarks tag can
+  // still override on a single waypoint.
+  // --------------------------------------------------------
+  if(key == "WPT_MODE") {
+    std::string lv = toLowerStr(value);
+    if(lv == "fast" || lv == "precise" || lv == "hold") {
+      m_current_mode = lv;
+      ctx.dlog("WaypointHandler: WPT_MODE mail -> " + lv);
+    }
+    return;
+  }
+
+  // --------------------------------------------------------
+  // NAV_X / NAV_Y: position updates for approach-distance
+  // calculation. We track both so approach slowdown works
+  // whether MOOS delivers them in either order.
+  // --------------------------------------------------------
+  if(key == "NAV_X") {
+    m_nav_x = atof(value.c_str());
+    m_nav_valid = true;
+    // Fall through to approach slowdown check below.
+  }
+  else if(key == "NAV_Y") {
+    m_nav_y = atof(value.c_str());
+    m_nav_valid = true;
+    // Fall through to approach slowdown check below.
+  }
+
+  // --------------------------------------------------------
+  // Approach slowdown check -- only meaningful in precise/
+  // hold modes, only before first capture, only once per
+  // waypoint. Triggers on NAV_X / NAV_Y mail.
+  // --------------------------------------------------------
+  if((key == "NAV_X" || key == "NAV_Y") &&
+     m_nav_valid &&
+     !m_approach_slowdown_applied &&
+     !m_wpt_reached_sent &&
+     (m_active_mode == "precise" || m_active_mode == "hold"))
+  {
+    double dx = m_target_x - m_nav_x;
+    double dy = m_target_y - m_nav_y;
+    double dist = std::sqrt(dx*dx + dy*dy);
+    double trigger = m_capture_radius + m_approach_buffer;
+
+    if(dist <= trigger) {
+      // Boat has entered the approach zone. Republish the
+      // update with the precise approach speed. BHV_Waypoint
+      // reads the new speed on its next iterate.
+      std::string update = buildUpdate(m_target_x, m_target_y,
+                                        m_precise_approach_speed);
+      ctx.publish(m_waypoint_update_var, update);
+      m_approach_slowdown_applied = true;
+
+      ctx.dlog("WaypointHandler: approach slowdown @ "
+               + doubleToStringX(dist, 1) + "m, speed="
+               + doubleToStringX(m_precise_approach_speed, 2) + " m/s");
+    }
+    // Fall through -- NAV_X/Y is not the trigger for any
+    // other state transition. Settlement uses NAV_SPEED.
+    if(key == "NAV_X" || key == "NAV_Y") return;
+  }
+  if(key == "NAV_X" || key == "NAV_Y") return;
+
+  // --------------------------------------------------------
   // Phase 1: capture detected -> begin watching speed.
   // Behavior stays active during this phase -- waypt_atak
   // continues to drive the boat back if it overshoots.
@@ -271,13 +473,34 @@ void WaypointHandler::onMail(const std::string& key,
       return;
     }
     m_wpt_reached_sent        = true;
-    m_post_capture_pending    = true;
-    m_post_capture_start_time = ctx.now();
     m_low_speed_start_time    = -1.0;   // not yet sub-threshold
 
+    // FAST mode: release immediately. No settle wait.
+    if(m_active_mode == "fast") {
+      std::string chat_dest = ctx.last_operator_callsign.empty()
+                              ? std::string("All Chat Rooms")
+                              : ctx.last_operator_callsign;
+      ctx.publish("ATAK_WAYPT_ACTIVE",       "false");
+      ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "false");
+      ctx.publish("ATAK_WPT_REACHED",        "false");
+      ctx.dm("Waypoint reached.", chat_dest);
+      m_post_capture_pending = false;
+      m_wpt_reached_sent     = false;  // ready for next
+      m_active_mode          = "";
+
+      ctx.dlog("WaypointHandler: fast mode -- released on capture, "
+               "DM'd " + chat_dest);
+      return;
+    }
+
+    // PRECISE / HOLD: enter pending state, station-keep
+    // while waiting for sustained settlement.
+    m_post_capture_pending    = true;
+    m_post_capture_start_time = ctx.now();
+
     // Reset the helm-side endflag so pHelmIvP doesn't see it
-    // latched. Note: the bhv will likely re-post it next
-    // iterate while still in capture radius -- that's fine,
+    // latched. The bhv will likely re-post it next iterate
+    // while still in capture radius -- that's fine,
     // m_wpt_reached_sent guards against re-processing.
     ctx.publish("ATAK_WPT_REACHED", "false");
 
@@ -285,14 +508,16 @@ void WaypointHandler::onMail(const std::string& key,
     // stays active and continues station-keeping on the pin
     // until Phase 2 fires (sustained settle or timeout).
 
-    ctx.dlog("WaypointHandler: phase 1 capture -- station-keeping, "
-             "watching for settle");
+    ctx.dlog("WaypointHandler: phase 1 capture (" + m_active_mode +
+             ") -- station-keeping, watching for settle");
     return;
   }
 
   // --------------------------------------------------------
   // Phase 2: speed update -- track sustained low speed or
   // safety timeout. Only acts while post-capture is pending.
+  // (Precise / hold modes only -- fast mode releases at
+  // Phase 1 and clears m_post_capture_pending.)
   // --------------------------------------------------------
   if(key == "NAV_SPEED") {
     m_last_speed = atof(value.c_str());
@@ -313,19 +538,32 @@ void WaypointHandler::onMail(const std::string& key,
       } else {
         double low_elapsed = ctx.now() - m_low_speed_start_time;
         if(low_elapsed >= m_settle_duration) {
-          // SETTLED. Deactivate behavior, DM, reset state.
-          ctx.publish("ATAK_WAYPT_ACTIVE",       "false");
-          ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "false");
-          ctx.dm("Waypoint reached.", chat_dest);
+          // SETTLED.
+          //   precise: deactivate bhv, DM, return to idle.
+          //   hold:    leave bhv active (continued station-
+          //            keep), DM, but don't reset m_active_mode.
+          //            Operator must use 'resume' to release.
+          if(m_active_mode == "hold") {
+            ctx.dm("Waypoint reached. Holding position.", chat_dest);
+            ctx.dlog("WaypointHandler: hold mode -- settled but "
+                     "keeping bhv active for station-keep");
+          } else {
+            // precise (or anything else that fell through)
+            ctx.publish("ATAK_WAYPT_ACTIVE",       "false");
+            ctx.publish("ATAK_WAYPT_ACTIVE_STATE", "false");
+            ctx.dm("Waypoint reached.", chat_dest);
+            ctx.dlog("WaypointHandler: precise mode -- settled, "
+                     "deactivated, DM'd " + chat_dest);
+          }
 
           m_post_capture_pending  = false;
           m_wpt_reached_sent      = false;
           m_low_speed_start_time  = -1.0;
-
-          ctx.dlog("WaypointHandler: settled -- sustained "
-                   + doubleToStringX(low_elapsed, 1) + "s below "
-                   + doubleToStringX(m_speed_stop_threshold, 2)
-                   + " m/s, deactivated + DM'd " + chat_dest);
+          // hold-mode keeps m_active_mode set so the operator
+          // can see in appcast what mode the boat is holding
+          // in. It clears on 'resume' (handled by ResumeHandler)
+          // or next CoT.
+          if(m_active_mode != "hold") m_active_mode = "";
           return;
         }
         // Still timing -- keep waiting.
@@ -355,6 +593,7 @@ void WaypointHandler::onMail(const std::string& key,
       m_post_capture_pending  = false;
       m_wpt_reached_sent      = false;
       m_low_speed_start_time  = -1.0;
+      m_active_mode           = "";   // even hold gives up
 
       ctx.dlog("WaypointHandler: timeout after "
                + doubleToStringX(total_elapsed, 1) + "s "
@@ -379,25 +618,37 @@ void WaypointHandler::appcast(std::string& report) const
   if(!m_last_waypoint.empty())
     report += "  Last:        " + m_last_waypoint + "\n";
   report += "  cap_radius:  " + doubleToStringX(m_capture_radius, 1) + " m\n";
+  report += "  def_speed:   " + doubleToStringX(m_default_speed, 2) + " m/s\n";
+  report += "  approach:    " + doubleToStringX(m_precise_approach_speed, 2)
+         +  " m/s within " + doubleToStringX(m_capture_radius + m_approach_buffer, 1)
+         +  " m\n";
   report += "  stop_thresh: " + doubleToStringX(m_speed_stop_threshold, 3) + " m/s\n";
   report += "  settle_dur:  " + doubleToStringX(m_settle_duration, 1)     + " s\n";
   report += "  timeout:     " + doubleToStringX(m_post_capture_timeout, 1) + " s\n";
+  report += "  def_mode:    " + m_default_mode + "\n";
+  report += "  cur_mode:    " + m_current_mode + "\n";
   report += "  enabled:     " + std::string(m_enabled ? "true" : "false") + "\n";
   report += "  phase:       ";
   if(m_post_capture_pending) {
-    report += "STATION-KEEP (last_speed="
-            + doubleToStringX(m_last_speed, 3) + " m/s";
+    report += "STATION-KEEP " + m_active_mode +
+              " (last_speed=" + doubleToStringX(m_last_speed, 3) + " m/s";
     if(m_low_speed_start_time >= 0.0)
       report += ", timer_armed";
     else
       report += ", timer_reset";
     report += ")\n";
+  } else if(!m_active_mode.empty()) {
+    // Either fast en-route, precise/hold approaching, or
+    // hold settled (post-Phase2 with bhv still active).
+    report += "ACTIVE " + m_active_mode;
+    if(m_approach_slowdown_applied) report += " (slowdown applied)";
+    report += "\n";
   } else if(m_wpt_reached_sent) {
     // Shouldn't normally hit -- pending should be true while
     // reached is true. Show as anomaly.
     report += "(reached latched, pending cleared)\n";
   } else {
-    report += "idle / navigating\n";
+    report += "idle\n";
   }
 }
 
