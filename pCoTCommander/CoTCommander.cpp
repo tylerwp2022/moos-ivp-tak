@@ -247,6 +247,22 @@ void CoTCommander::bindContext()
 
   m_ctx.dm = [this](const std::string& msg,
                      const std::string& reply_to) {
+    // pCoTChat parses ATAK_CHAT_OUT by searching for the
+    // literal substring "|chatroom=", not by splitting on
+    // any '|'. So pipes embedded in the message content
+    // pass through correctly. Handlers may use '|' freely.
+    //
+    // What WILL break the DM (silently -- ATAK drops the
+    // CoT and the operator sees nothing):
+    //   * Raw '<' or '>' in message content. pCoTChat
+    //     inserts the message text RAW into the CoT XML
+    //     as the content of <remarks>...</remarks>. Angle
+    //     brackets corrupt the XML structure and ATAK
+    //     drops the malformed event.
+    //   * Raw '&' that isn't part of a valid XML entity.
+    //     Use the escape: &amp;.
+    // Use "&#10;" for line breaks (HTML decimal LF entity);
+    // raw '\n' breaks the XML the same way.
     Notify("ATAK_CHAT_OUT",
            "message=" + msg + "|chatroom=" + reply_to);
   };
@@ -518,9 +534,10 @@ void CoTCommander::dispatchChatCommand(const std::string& moos_val)
   auto it = m_chat_index.find(msg.first_word);
   if(it == m_chat_index.end()) {
     m_chat_unknown++;
-    Notify("ATAK_CHAT_OUT",
-           "message=Unknown command: \"" + raw_message +
-           "\". Try 'help'.|chatroom=" + msg.reply_to);
+    // Route through m_ctx.dm so pipe-sanitization applies
+    // (operator-typed raw_message could contain '|').
+    m_ctx.dm("Unknown command: \"" + raw_message + "\". Try 'help'.",
+             msg.reply_to);
     debugLog("dispatchChatCommand: unknown first_word=" + msg.first_word);
     return;
   }

@@ -73,9 +73,11 @@ bool HelpHandler::handleChat(const ChatMessage& msg,
 
   // Fleet-mode-only hint about the vehicle-prefix syntax.
   // The dispatcher handles this transparently, but operators
-  // need to know it exists.
+  // need to know it exists. Square brackets used instead of
+  // angle brackets because '<' and '>' break the CoT XML
+  // body when the message is embedded in <remarks>.
   if(ctx.fleet_mode) {
-    help_text += "<vehicle> <command>  -- per-vehicle "
+    help_text += "[vehicle] [command]  -- per-vehicle "
                  "(e.g. blue_one attack)";
     help_text += NL;
   }

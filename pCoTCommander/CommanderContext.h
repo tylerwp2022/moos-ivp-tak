@@ -94,23 +94,38 @@ struct CommanderContext
   // Send an ATAK DM (GeoChat reply) to the operator.
   // Formats ATAK_CHAT_OUT internally as
   //   "message=<msg>|chatroom=<reply_to>"
-  // (note: '|' delimiter, because message text can contain
-  // commas -- see pCoTChat). Handlers just pass the human-
-  // readable message and the reply_to chatroom from
-  // ChatMessage::reply_to.
+  // pCoTChat parses by searching for the literal substring
+  // "|chatroom=" (not by splitting on any '|'), so pipes
+  // embedded in the message body parse correctly.
   //
-  // IMPORTANT -- GeoChat is a CoT XML transport. Message
-  // content is embedded raw in the CoT XML body, so:
-  //   * For line breaks, use the HTML decimal entity
-  //     "&#10;" -- NEVER a literal '\n'. A raw newline
-  //     either breaks the XML or is silently dropped by
-  //     the TAK server, and the operator sees nothing.
-  //   * Avoid '<', '>', and '&' in message content. If
-  //     unavoidable, escape as &lt; &gt; &amp;.
-  //   * Keep messages under ~250 chars; very long DMs
-  //     may be truncated by some ATAK clients.
-  // HelpHandler is the canonical multi-line example --
-  // see how it builds help_text with "&#10;" separators.
+  // IMPORTANT -- GeoChat is a CoT XML transport. pCoTChat
+  // inserts the message text RAW into the CoT XML as the
+  // content of <remarks>...</remarks>. This means:
+  //
+  //   * Use "&#10;" for line breaks (HTML decimal entity
+  //     for LF). NEVER use a raw '\n' -- the XML breaks
+  //     and the TAK server drops the malformed event.
+  //     The operator sees nothing.
+  //
+  //   * Avoid raw '<' and '>' in message content. They
+  //     open phantom XML tags inside <remarks> and corrupt
+  //     the whole event. ATAK silently drops malformed
+  //     CoT. Use [brackets] or other punctuation instead.
+  //     If you absolutely must, escape as &lt; and &gt;.
+  //
+  //   * Avoid raw '&' unless it begins a valid XML entity.
+  //     Escape literal ampersands as &amp;.
+  //
+  //   * '|' in message content is fine -- pCoTChat handles
+  //     it. Use freely (e.g. "avoid on|off").
+  //
+  //   * Keep messages under ~250 chars; very long DMs may
+  //     be truncated by some ATAK clients.
+  //
+  // HelpHandler is the canonical multi-line example -- it
+  // builds help_text with "&#10;" separators and uses
+  // [vehicle] [command] not <vehicle> <command> for the
+  // fleet-prefix hint.
   std::function<void(const std::string& msg,
                       const std::string& reply_to)>   dm;
 

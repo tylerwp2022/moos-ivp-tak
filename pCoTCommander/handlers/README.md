@@ -326,7 +326,7 @@ Don't subclass `CoTCommandHandler` to share state — handlers are unique instan
 
 ❌ **Don't write to `ctx.deployed` / `ctx.atak_mode` / etc.** Those are dispatcher-owned. The only mutable ctx field handlers may write is `ctx.last_operator_callsign`.
 
-❌ **Don't put raw `\n`, `<`, `>`, or `&` in `ctx.dm()` messages.** ATAK GeoChat is a CoT XML transport — the message text is embedded raw in the XML body. Newlines break the XML and the TAK server drops the message; angle brackets and ampersands corrupt the structure. Use `"&#10;"` for line breaks and escape as `&lt; &gt; &amp;` if you need the others. Symptom of getting this wrong: handler counter ticks (showing the handler ran), but nothing appears in ATAK. See `HelpHandler.cpp` for the canonical multi-line DM pattern.
+❌ **Don't put raw `\n`, `<`, `>`, or unescaped `&` in `ctx.dm()` messages.** pCoTChat inserts the message text raw into `<remarks>...</remarks>` of the outbound CoT XML. Newlines break the XML and the TAK server drops the message; angle brackets open phantom tags and corrupt the structure; bare ampersands break entity parsing. Use `"&#10;"` for line breaks, `[brackets]` instead of `<angle brackets>`, and `&amp;` for literal ampersands. **Pipes (`|`) are fine** — pCoTChat parses by searching for the literal `"|chatroom="` substring, not by splitting on `|`. Symptom of getting any of these wrong: handler counter ticks (handler ran), but nothing appears in ATAK (the CoT was malformed and ATAK dropped it). See `HelpHandler.cpp` for the canonical multi-line DM pattern.
 
 ❌ **Don't bypass the registry.** If you find yourself adding a special case to `CoTCommander.cpp` to handle a specific keyword or CoT type, stop. Make a handler for it instead.
 
