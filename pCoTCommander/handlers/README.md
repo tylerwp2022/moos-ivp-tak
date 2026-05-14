@@ -326,6 +326,8 @@ Don't subclass `CoTCommandHandler` to share state — handlers are unique instan
 
 ❌ **Don't write to `ctx.deployed` / `ctx.atak_mode` / etc.** Those are dispatcher-owned. The only mutable ctx field handlers may write is `ctx.last_operator_callsign`.
 
+❌ **Don't put raw `\n`, `<`, `>`, or `&` in `ctx.dm()` messages.** ATAK GeoChat is a CoT XML transport — the message text is embedded raw in the XML body. Newlines break the XML and the TAK server drops the message; angle brackets and ampersands corrupt the structure. Use `"&#10;"` for line breaks and escape as `&lt; &gt; &amp;` if you need the others. Symptom of getting this wrong: handler counter ticks (showing the handler ran), but nothing appears in ATAK. See `HelpHandler.cpp` for the canonical multi-line DM pattern.
+
 ❌ **Don't bypass the registry.** If you find yourself adding a special case to `CoTCommander.cpp` to handle a specific keyword or CoT type, stop. Make a handler for it instead.
 
 ---

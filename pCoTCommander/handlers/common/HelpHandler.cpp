@@ -56,10 +56,19 @@ bool HelpHandler::handleChat(const ChatMessage& msg,
 
   std::vector<std::string> lines = ctx.help_lines();
 
-  std::string help_text = "Available commands:\n";
+  // ATAK GeoChat renders &#10; (HTML decimal entity for line
+  // feed) as a newline. A raw '\n' character embedded in
+  // the CoT XML body breaks the message -- the TAK server
+  // either drops it or truncates at the first newline,
+  // resulting in nothing appearing in ATAK. Use the entity.
+  static const char* NL = "&#10;";
+
+  std::string help_text = "Available commands:";
+  help_text += NL;
   for(const std::string& line : lines) {
     if(line.empty()) continue;
-    help_text += line + "\n";
+    help_text += line;
+    help_text += NL;
   }
 
   // Fleet-mode-only hint about the vehicle-prefix syntax.
@@ -67,7 +76,8 @@ bool HelpHandler::handleChat(const ChatMessage& msg,
   // need to know it exists.
   if(ctx.fleet_mode) {
     help_text += "<vehicle> <command>  -- per-vehicle "
-                 "(e.g. blue_one attack)\n";
+                 "(e.g. blue_one attack)";
+    help_text += NL;
   }
 
   ctx.dm(help_text, msg.reply_to);

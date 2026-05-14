@@ -98,6 +98,19 @@ struct CommanderContext
   // commas -- see pCoTChat). Handlers just pass the human-
   // readable message and the reply_to chatroom from
   // ChatMessage::reply_to.
+  //
+  // IMPORTANT -- GeoChat is a CoT XML transport. Message
+  // content is embedded raw in the CoT XML body, so:
+  //   * For line breaks, use the HTML decimal entity
+  //     "&#10;" -- NEVER a literal '\n'. A raw newline
+  //     either breaks the XML or is silently dropped by
+  //     the TAK server, and the operator sees nothing.
+  //   * Avoid '<', '>', and '&' in message content. If
+  //     unavoidable, escape as &lt; &gt; &amp;.
+  //   * Keep messages under ~250 chars; very long DMs
+  //     may be truncated by some ATAK clients.
+  // HelpHandler is the canonical multi-line example --
+  // see how it builds help_text with "&#10;" separators.
   std::function<void(const std::string& msg,
                       const std::string& reply_to)>   dm;
 
