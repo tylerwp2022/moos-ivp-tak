@@ -383,6 +383,14 @@ std::string StatusHandler::buildVehicleStatusFromCache(const VehicleState& v) co
 // ============================================================
 // buildShoreStatus -- game state + usage hint (path P2)
 // ============================================================
+//
+// CAUTION: Message text is inserted RAW into the CoT
+// <remarks>...</remarks> block by pCoTChat. Literal '<' or
+// '>' characters open phantom XML tags and ATAK silently
+// drops the whole CoT. Use [brackets] (not <angle> brackets)
+// in any operator-facing text. Pipes, ampersands, slashes,
+// quotes are all fine; only '<' and '>' break things.
+// See CommanderContext.h ctx.dm docs for the full rule set.
 
 std::string StatusHandler::buildShoreStatus() const
 {
@@ -395,7 +403,7 @@ std::string StatusHandler::buildShoreStatus() const
             (m_aquaticus_game.empty() ? std::string("(unset)")
                                        : m_aquaticus_game);
   status += NL;
-  status += "  '<vehicle> status' queries one vehicle.";
+  status += "  '[vehicle] status' queries one vehicle.";
   status += NL;
   status += "  'status all' queries the fleet.";
 
