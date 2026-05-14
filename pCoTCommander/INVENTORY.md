@@ -116,6 +116,11 @@ Custom mode: `command_set = custom` plus one `enable_handler = <name>` per desir
 
 ## Reference — design docs in this bundle
 
+- **`handlers/README.md`** — **READ FIRST when extending.** Step-by-step walkthrough for adding new chat commands or CoT handlers, with a decision tree, pattern catalog, `.bhv` coupling rules, anti-patterns, and a final checklist.
+- **`handlers/_templates/`** — Three copy-paste-ready handler templates:
+   - `ChatToggleHandlerTemplate.{h,cpp}` for on/off toggles
+   - `ChatCommandHandlerTemplate.{h,cpp}` for single-action commands
+   - `CoTEventHandlerTemplate.{h,cpp}` for inbound CoT events
 - **`handlers/CoTCommandHandler.h`** — handler contract, dispatch flow, lifecycle, "adding a new command" workflow
 - **`CommandHandlerFactory.h`** — (role, mission) axis, folder organization, bundle composition rules
 - **`CommanderContext.h`** — DI bundle, threading rules, mirrored-state semantics

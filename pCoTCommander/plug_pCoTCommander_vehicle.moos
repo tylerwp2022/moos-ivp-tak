@@ -4,29 +4,58 @@
 // nsplug fragment for the per-vehicle pCoTCommander. Include
 // this in each vehicle's launch configuration.
 //
-// Expected nsplug variables (defined upstream by the vehicle
-// launch wrapper):
+// REQUIRED nsplug variables (must be defined upstream):
 //   $(VNAME)              -- vehicle role name, e.g. "blue_one".
 //                            Used as the ATAK callsign /
 //                            chatroom (VNAME=RNAME convention).
-//   $(VTEAM)              -- lowercase team, e.g. "blue".
-//                            Used in flag_my_team (skip own
-//                            flag) and to construct the
-//                            HAS_FLAG_<TEAM>_* variable names.
-//   $(VTEAM_UPPER)        -- uppercase team, e.g. "BLUE". Used
-//                            in the HAS_FLAG variable list.
-//   $(OPP_TEAM)           -- lowercase opposing team, e.g.
-//                            "red". Used in flag_uid for the
-//                            opponent's flag marker.
-//   $(DEBUG_PCOTCMD)      -- optional, "true"/"false".
-//                            Defaults to "false".
+//   $(VTEAM)              -- lowercase team, "blue" or "red".
+//                            Used to skip own flag.
 //
-// Loads the Aquaticus vehicle bundle:
-//   14 chat handlers + WaypointHandler (CoT b-m-p-w-GOTO) +
-//   FlagPursuitHandler (CoT b-m-p-s-m). Total 16 handlers.
+// OPTIONAL nsplug variables (auto-derived from VTEAM below
+// if not already defined upstream):
+//   $(VTEAM_UPPER)        -- uppercase team, "BLUE" or "RED".
+//                            Used in HAS_FLAG_<TEAM>_* names.
+//   $(OPP_TEAM)           -- lowercase opposing team. Used
+//                            in flag_uid for the opponent's
+//                            flag marker.
+//   $(DEBUG_PCOTCMD)      -- "true"/"false". Defaults to
+//                            "false" if unset.
 //
 // REV: May 13, 2026 -- handler-class refactor
+// REV: May 13, 2026 -- derive VTEAM_UPPER/OPP_TEAM from VTEAM
+//                       so launch wrappers only need to set
+//                       VTEAM (not all three).
 //------------------------------------------------------------
+
+//------------------------------------------------------------
+// Derive VTEAM_UPPER and OPP_TEAM from VTEAM if not already
+// defined upstream. nsplug doesn't do case conversion, so
+// the two Aquaticus teams are listed explicitly. Add a
+// branch here if you add a new team.
+//
+// If your nsplug version doesn't support value-matched
+// #ifdef, comment this block out and add the equivalent
+// -DVTEAM_UPPER=... -DOPP_TEAM=... to your launch wrapper.
+//------------------------------------------------------------
+
+#ifdef VTEAM blue
+  #ifndef VTEAM_UPPER
+    #define VTEAM_UPPER BLUE
+  #endif
+  #ifndef OPP_TEAM
+    #define OPP_TEAM red
+  #endif
+#endif
+
+#ifdef VTEAM red
+  #ifndef VTEAM_UPPER
+    #define VTEAM_UPPER RED
+  #endif
+  #ifndef OPP_TEAM
+    #define OPP_TEAM blue
+  #endif
+#endif
+
 
 ProcessConfig = pCoTCommander
 {
@@ -44,10 +73,7 @@ ProcessConfig = pCoTCommander
   command_chatroom = $(VNAME)
   enable_chat_commands = true
 
-  // Optional substring filter on incoming CoT uid. Typical
-  // values: "ANDROID" (only accept CoT from ATAK clients),
-  // "$(VNAME)" (only accept CoT addressed to this vehicle
-  // via its callsign). Leave commented to accept all uids.
+  // Optional substring filter on incoming CoT uid.
   // operator_uid_filter = ANDROID
 
   // ---- Diagnostics ----
@@ -56,47 +82,26 @@ ProcessConfig = pCoTCommander
   //==========================================================
   // Handler-specific config
   //==========================================================
-  // Each key is consumed only by the handler that recognizes
-  // it. Other handlers ignore unknown keys silently, so this
-  // section can grow without affecting unrelated handlers.
 
   //-- WaypointHandler (CoT b-m-p-w-GOTO from ATAK) ----------
 
-  // BHV_Waypoint capture radius in meters.
-  capture_radius = 15.0
-
-  // MOOS variable name that the waypt_atak behavior watches
-  // via its 'updates = ...' line. Must match the .bhv file.
-  waypoint_update_var = ATAK_WPT_UPDATE
-
-  // Master switch. When false, the handler is loaded but
-  // claimsCoT() always returns false, so ATAK Go-To commands
-  // are silently ignored.
+  capture_radius          = 15.0
+  waypoint_update_var     = ATAK_WPT_UPDATE
   enable_waypoint_control = true
 
   //-- FlagPursuitHandler (CoT b-m-p-s-m flag uid match) -----
 
   flag_pursuit_enabled = true
 
-  // Opponent's flag CoT uid. The Aquaticus referee
-  // broadcasts the flag with a fixed uid; this handler
-  // matches exact-equality on it.
+  // Opponent's flag CoT uid. OPP_TEAM derived above.
   flag_uid = aquaticus-flag-$(OPP_TEAM)
 
-  // Lowercase. Belt-and-suspenders defense -- if the flag
-  // uid contains this team name, skip (we'd be chasing
-  // our own flag).
+  // Our own team -- skip own flag broadcasts.
   flag_my_team = $(VTEAM)
 
-  // Smaller than capture_radius so we drive INTO the
-  // Aquaticus grab zone rather than stopping short.
   flag_capture_radius = 5.0
 
-  // Comma-separated list of variables to subscribe for
-  // pursuit-termination. When ANY goes true a teammate
-  // has the flag; pursuit ends silently.
-  //
-  // Naming convention: HAS_FLAG_<TEAM_UPPER>_<SLOT>. Adjust
-  // if your Aquaticus setup uses a different scheme.
+  // Pursuit terminates when ANY of these go true (teammate
+  // has the flag). VTEAM_UPPER derived above.
   team_flag_vars = HAS_FLAG_$(VTEAM_UPPER)_ONE,HAS_FLAG_$(VTEAM_UPPER)_TWO,HAS_FLAG_$(VTEAM_UPPER)_THREE
 }
