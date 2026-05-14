@@ -182,6 +182,7 @@ private:
   // ---- Builders ----
   std::string buildVehicleStatusFromCtx(const CommanderContext& ctx) const;
   std::string buildVehicleStatusFromCache(const VehicleState& v) const;
+  std::string buildVehicleStatusOneLine(const VehicleState& v) const;
   std::string buildShoreStatus() const;
   std::string deriveTask(bool deployed,
                           bool tagged,

@@ -381,6 +381,34 @@ std::string StatusHandler::buildVehicleStatusFromCache(const VehicleState& v) co
 
 
 // ============================================================
+// buildVehicleStatusOneLine -- compact per-vehicle summary
+// ============================================================
+//
+// Used by fleet status (path P4). Format:
+//   blue_one: ATAK control -- Navigating to operator waypoint [+FLAG]
+//
+// Stays under ~70 chars per line so 6-11 vehicles all fit
+// comfortably in a single ATAK GeoChat message. No '<' or
+// '>' characters -- see CommanderContext.h ctx.dm docs.
+
+std::string StatusHandler::buildVehicleStatusOneLine(const VehicleState& v) const
+{
+  std::string mode = deriveMode(v.deployed, v.atak_mode);
+  std::string task = deriveTask(v.deployed,
+                                  v.tagged,
+                                  v.atak_mode,
+                                  v.atak_waypt_active,
+                                  v.atak_flag_pursuit,
+                                  v.atak_auto_untag,
+                                  v.action);
+
+  std::string line = v.vname_label + ": " + mode + " -- " + task;
+  if(v.has_flag) line += " [+FLAG]";
+  return line;
+}
+
+
+// ============================================================
 // buildShoreStatus -- game state + usage hint (path P2)
 // ============================================================
 //
@@ -455,6 +483,14 @@ bool StatusHandler::handleChat(const ChatMessage& msg,
 
   // ----------------------------------------------------------
   // P4: shore + "status all" -- fleet rollcall
+  //
+  // Assembled as a single multi-line DM so all vehicle statuses
+  // arrive in one CoT message. Multiple ctx.dm() calls in the
+  // same Iterate() produce a burst of CoT messages with
+  // colliding UIDs (pCoTChat generates GeoChat UIDs at
+  // second-resolution timestamps), so only one would render
+  // in ATAK and the rest would be silently dropped. One DM,
+  // one CoT, one UID, full fleet visible.
   // ----------------------------------------------------------
   if(rest == "all") {
     if(msg.sfx != "_ALL") {
@@ -469,15 +505,15 @@ bool StatusHandler::handleChat(const ChatMessage& msg,
       return false;
     }
 
-    // One DM per vehicle. ATAK GeoChat handles them as
-    // separate messages in the shore thread, in iteration
-    // order (predictable because m_vehicle_order is a vector).
+    static const char* NL = "&#10;";
+    std::string fleet_status = "Fleet status:";
     for(const auto& upper : m_vehicle_order) {
       auto it = m_vehicles.find(upper);
       if(it == m_vehicles.end()) continue;
-      std::string status = buildVehicleStatusFromCache(it->second);
-      ctx.dm(status, msg.reply_to);
+      fleet_status += NL;
+      fleet_status += "  " + buildVehicleStatusOneLine(it->second);
     }
+    ctx.dm(fleet_status, msg.reply_to);
 
     m_chat_fleet++;
     m_last_action = "P4 fleet -> " + msg.reply_to;
