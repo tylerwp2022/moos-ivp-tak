@@ -35,8 +35,20 @@
 /*    stationary_send_interval = 3.0s   (default)           */
 /*    speed_threshold          = 0.5 m/s                    */
 /*                                                          */
+/*  Stealth integration (optional, multi-vehicle mode):     */
+/*    stealth_integration = true                            */
+/*    Subscribes to HVT_REVEAL_STATE from uFldNodeCommsHVT  */
+/*    and suppresses CoT for vehicles currently hidden, so  */
+/*    they do not appear in TAK until revealed. Hostiles    */
+/*    not (yet) listed in HVT_REVEAL_STATE are treated as   */
+/*    hidden — fail-safe: no leak while the hidden roster   */
+/*    builds up during startup. Assumes the hidden group    */
+/*    covers the hostile vehicles.                          */
+/*    Default is false — always report all locations.       */
+/*                                                          */
 /*  MOOS Interface:                                         */
-/*    Subscribes: NODE_REPORT, NODE_REPORT_LOCAL            */
+/*    Subscribes: NODE_REPORT, NODE_REPORT_LOCAL,           */
+/*                HVT_REVEAL_STATE                          */
 /*    Publishes:  COT_OUTBOUND (raw CoT XML strings)        */
 /************************************************************/
 
@@ -95,6 +107,10 @@ protected:
   bool shouldTrack(const std::string& name) const;
   bool isFriendly(const std::string& name) const;
 
+  // Stealth integration (HVT_REVEAL_STATE from uFldNodeCommsHVT)
+  void handleRevealState(const std::string& spec);
+  bool isHidden(const std::string& name) const;
+
 private:
   // --------------------------------------------------------
   // Vehicle configuration
@@ -118,18 +134,38 @@ private:
                                       // moving/stationary throttle disabled.
 
   // --------------------------------------------------------
-  // Single-vehicle affiliation and team color
+  // Affiliation and team colors
   //
   //   affiliation=f, team_color=Cyan → friendly cyan,  IN contacts list
   //   affiliation=h, team_color=Red  → hostile red,    IN contacts list
   //   affiliation=h (no team_color)  → hostile diamond, MAP ONLY
   //
   // In multi-vehicle mode, affiliation is derived from
-  // m_own_set / m_hostile_set; team_color from config applies
-  // to all friendly vehicles tracked by this instance.
+  // m_own_set / m_hostile_set. team_color applies to friendly
+  // vehicles, hostile_team_color to hostile vehicles. An empty
+  // color means no __group element — the contact renders from
+  // its CoT type (hostile diamond for a-h) and is map-only.
   // --------------------------------------------------------
-  std::string m_affiliation;   // "f" | "h" | "n" | "u" (default: "f")
-  std::string m_team_color;    // ATAK team color, or empty for map-only
+  std::string m_affiliation;         // "f" | "h" | "n" | "u" (default: "f")
+  std::string m_team_color;          // ATAK color for friendlies, or empty
+  std::string m_hostile_team_color;  // ATAK color for hostiles,  or empty
+
+  // --------------------------------------------------------
+  // Stealth integration (uFldNodeCommsHVT)
+  //
+  // stealth_integration=true: vehicles marked "hidden" in the
+  // latest HVT_REVEAL_STATE are tracked internally but produce
+  // no CoT — they vanish from TAK (contact goes stale after
+  // cot_stale_offset). Hostiles not (yet) listed in the reveal
+  // state are treated as hidden so no position leaks while the
+  // hidden roster builds up during startup.
+  //
+  // stealth_integration=false (default): always report all
+  // tracked vehicles regardless of reveal state.
+  // --------------------------------------------------------
+  bool m_stealth_integration;
+  bool m_reveal_state_received;         // first HVT_REVEAL_STATE seen
+  std::map<std::string, bool> m_hidden_map;  // vname -> currently hidden
 
   // --------------------------------------------------------
   // Debug
@@ -142,6 +178,7 @@ private:
   // Diagnostics
   // --------------------------------------------------------
   unsigned int m_pos_cot_sent;
+  unsigned int m_pos_cot_suppressed;  // sends skipped while hidden
 };
 
 #endif // COT_CONTACT_HEADER

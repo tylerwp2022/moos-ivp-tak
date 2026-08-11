@@ -28,12 +28,17 @@ CoTContact::CoTContact()
   m_speed_threshold          = 0.5;
   m_cot_stale_offset         = 10.0;
 
-  m_immediate   = false;
-  m_affiliation = "f";   // default: friendly
-  m_team_color  = "";    // default: no __group (map-only if unset)
+  m_immediate          = false;
+  m_affiliation        = "f";  // default: friendly
+  m_team_color         = "";   // default: no __group (map-only if unset)
+  m_hostile_team_color = "";   // default: hostiles render as diamonds
 
-  m_debug        = false;
-  m_pos_cot_sent = 0;
+  m_stealth_integration   = false;
+  m_reveal_state_received = false;
+
+  m_debug              = false;
+  m_pos_cot_sent       = 0;
+  m_pos_cot_suppressed = 0;
 }
 
 
@@ -166,9 +171,20 @@ bool CoTContact::OnStartUp()
       m_team_color = stripBlankEnds(v);
       debugLog("Config: team_color = " + m_team_color);
     }
+    else if(param == "hostile_team_color") {
+      // Preserve case — ATAK team color names are capitalized
+      string v = orig; biteStringX(v, '=');
+      m_hostile_team_color = stripBlankEnds(v);
+      debugLog("Config: hostile_team_color = " + m_hostile_team_color);
+    }
     else if(param == "immediate") {
       setBooleanOnString(m_immediate, value);
       debugLog("Config: immediate = " + boolToString(m_immediate));
+    }
+    else if(param == "stealth_integration") {
+      setBooleanOnString(m_stealth_integration, value);
+      debugLog("Config: stealth_integration = " +
+               boolToString(m_stealth_integration));
     }
     else
       handled = false;
@@ -209,6 +225,8 @@ void CoTContact::registerVariables()
   AppCastingMOOSApp::RegisterVariables();
   Register("NODE_REPORT",       0);
   Register("NODE_REPORT_LOCAL", 0);
+  if(m_stealth_integration)
+    Register("HVT_REVEAL_STATE", 0);
 }
 
 
@@ -222,7 +240,10 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
 
   for(auto& msg : NewMail) {
     string key = msg.m_sKey;
-    if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL") {
+    if(key == "HVT_REVEAL_STATE") {
+      handleRevealState(msg.m_sVal);
+    }
+    else if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL") {
       if(!parseNodeReport(msg.m_sVal)) continue;
       if(!m_immediate) continue;
       string name;
@@ -232,6 +253,10 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
       }
       auto it = m_vehicles.find(name);
       if(it != m_vehicles.end() && it->second.valid) {
+        if(isHidden(name)) {
+          m_pos_cot_suppressed++;
+          continue;
+        }
         Notify("COT_OUTBOUND", buildPositionCoT(it->second));
         it->second.last_sent = m_curr_time;
         m_pos_cot_sent++;
@@ -261,6 +286,14 @@ bool CoTContact::Iterate()
       double interval = moving ? m_moving_send_interval
                                : m_stationary_send_interval;
       if((m_curr_time - vs.last_sent) < interval) continue;
+    }
+
+    // Stealth: withhold this send slot; last_sent still advances so
+    // the suppressed counter ticks at the send cadence, not AppTick.
+    if(isHidden(vs.name)) {
+      vs.last_sent = m_curr_time;
+      m_pos_cot_suppressed++;
+      continue;
     }
 
     Notify("COT_OUTBOUND", buildPositionCoT(vs));
@@ -299,6 +332,66 @@ bool CoTContact::isFriendly(const std::string& name) const
     return (m_own_set.count(name) > 0);
   else
     return true; // single-vehicle mode is always own vehicle
+}
+
+
+// ============================================================
+// handleRevealState()
+//
+// Parses HVT_REVEAL_STATE from uFldNodeCommsHVT:
+//   mode=3,red_one=hidden,red_two=revealed
+// Vehicles listed are the hidden-group members; anything not
+// listed is not subject to hiding and always reports.
+// ============================================================
+
+void CoTContact::handleRevealState(const std::string& spec)
+{
+  map<string, bool> new_map;
+  for(auto& tok : parseString(spec, ',')) {
+    string t   = tok;
+    string key = tolower(biteStringX(t, '='));
+    string val = tolower(stripBlankEnds(t));
+    if(key == "mode") continue;
+    new_map[key] = (val == "hidden");
+  }
+
+  for(auto& kv : new_map) {
+    auto it = m_hidden_map.find(kv.first);
+    if(it == m_hidden_map.end() || it->second != kv.second)
+      debugLog("RevealState: " + kv.first + " -> " +
+               string(kv.second ? "hidden" : "revealed"));
+  }
+
+  m_hidden_map = new_map;
+  m_reveal_state_received = true;
+}
+
+
+// ============================================================
+// isHidden()
+//
+// True if the vehicle's CoT should be withheld from TAK.
+// Only ever true when stealth_integration=true.
+//
+// A hostile not (yet) listed in HVT_REVEAL_STATE is treated as
+// hidden. The hidden roster builds up as vehicles' node reports
+// reach uFldNodeCommsHVT's ledger, so during startup a hostile
+// may be tracked here before it appears in the reveal state —
+// defaulting to visible would leak it to TAK in that window.
+// Consequence: stealth_integration assumes the hidden group
+// covers the hostile vehicles (true for the HVT missions).
+// ============================================================
+
+bool CoTContact::isHidden(const std::string& name) const
+{
+  if(!m_stealth_integration)
+    return false;
+
+  auto it = m_hidden_map.find(tolower(name));
+  if(it != m_hidden_map.end())
+    return it->second;
+
+  return !isFriendly(name);
 }
 
 
@@ -394,16 +487,22 @@ string CoTContact::buildPositionCoT(const VehicleState& vs)
   string t_now   = formatCoTTime(vs.timestamp, 0.0);
   string t_stale = formatCoTTime(vs.timestamp, m_cot_stale_offset);
 
-  // __group included only when team_color is non-empty.
-  // Empty team_color = map-only (hostile diamond for red team).
+  // Friendlies use team_color, hostiles use hostile_team_color.
+  // ATAK's __group detail overrides type-based rendering, so an
+  // empty color = no __group = the contact renders from its CoT
+  // type (hostile diamond for a-h) and is map-only.
+  string color = (affil == "f") ? m_team_color : m_hostile_team_color;
   string group_elem = "";
-  if(!m_team_color.empty())
-    group_elem = "<__group name=\"" + m_team_color + "\" role=\"Team Member\"/>";
+  if(!color.empty())
+    group_elem = "<__group name=\"" + color + "\" role=\"Team Member\"/>";
+
+  // Map-only contacts get no endpoint — an endpoint would list
+  // them as messageable in ATAK's contacts list.
+  string endpoint_attr = group_elem.empty() ? "" : " endpoint=\"*:-1:stcp\"";
 
   string detail =
     "<detail>"
-      "<contact callsign=\"" + vs.name + "\""
-               " endpoint=\"*:-1:stcp\"/>"
+      "<contact callsign=\"" + vs.name + "\"" + endpoint_attr + "/>"
     + group_elem +
       "<uid Droid=\""        + vs.name + "\"/>"
       "<takv"
@@ -463,7 +562,16 @@ bool CoTContact::buildReport()
     : "SINGLE-VEHICLE (" + m_own_vehicle + ")";
   m_msgs << "Mode: " << mode
          << "  debug=" << boolToString(m_debug) << endl;
-  m_msgs << "CoT sent: " << m_pos_cot_sent << endl;
+  if(m_stealth_integration)
+    m_msgs << "Stealth integration: ON ("
+           << (m_reveal_state_received ? "reveal state received"
+                                       : "awaiting HVT_REVEAL_STATE — "
+                                         "hostiles withheld")
+           << ")" << endl;
+  m_msgs << "CoT sent: " << m_pos_cot_sent;
+  if(m_stealth_integration)
+    m_msgs << "  suppressed: " << m_pos_cot_suppressed;
+  m_msgs << endl;
   m_msgs << endl;
 
   m_msgs << "Tracked vehicles (" << m_vehicles.size() << "):" << endl;
@@ -474,6 +582,7 @@ bool CoTContact::buildReport()
     bool   moving = (vs.speed > m_speed_threshold);
     m_msgs << "  " << vs.name
            << (vs.friendly ? " [own]" : " [opp]")
+           << (isHidden(vs.name) ? " [HIDDEN]" : "")
            << (moving      ? " MOV"   : " STA")
            << (stale ? " STALE(" + doubleToStringX(age, 1) + "s)" : "")
            << "  lat=" << doubleToStringX(vs.lat, 6)

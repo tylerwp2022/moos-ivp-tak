@@ -76,6 +76,11 @@ void showExampleConfigAndExit()
   blk("  // and sends CoT on every NODE_REPORT.                       ");
   blu("  immediate = false                                             ");
   blk("                                                                ");
+  blk("  // stealth_integration=true suppresses CoT for vehicles      ");
+  blk("  // marked hidden in HVT_REVEAL_STATE (uFldNodeCommsHVT).     ");
+  blk("  // false (default) = always report all locations.            ");
+  blu("  stealth_integration = false                                   ");
+  blk("                                                                ");
   blu("  debug = false                                                 ");
   blk("}                                                               ");
   blk("                                                                ");
@@ -113,6 +118,8 @@ void showInterfaceAndExit()
   blk("------------------------------------                            ");
   blk("  NODE_REPORT       = NAME=...,LAT=...,LON=...,HDG=...,SPD=...");
   blk("  NODE_REPORT_LOCAL = (same format)                             ");
+  blk("  HVT_REVEAL_STATE  = mode=3,red_one=hidden,red_two=revealed   ");
+  blk("    (only when stealth_integration=true; from uFldNodeCommsHVT)");
   blk("                                                                ");
   blk("PUBLICATIONS:                                                   ");
   blk("------------------------------------                            ");
@@ -127,6 +134,11 @@ void showInterfaceAndExit()
   blk("    Omit team_color for map-only (no contacts list entry).     ");
   blk("  immediate = true|false   true = send on every NODE_REPORT;  ");
   blk("    moving/stationary throttle disabled.                       ");
+  blk("  stealth_integration = true|false  (default: false)          ");
+  blk("    true = withhold CoT for vehicles currently hidden per     ");
+  blk("    HVT_REVEAL_STATE; they reappear in TAK when revealed.     ");
+  blk("    Hostiles not yet listed in the reveal state are withheld ");
+  blk("    (fail-safe). false = always report everyone.             ");
   blk("                                                                ");
   exit(0);
 }

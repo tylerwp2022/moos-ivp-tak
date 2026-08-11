@@ -29,9 +29,19 @@
 //   throttle and sends on every NODE_REPORT.
 //   Contact expires in ATAK after cot_stale_offset seconds with no update.
 //
+// STEALTH INTEGRATION (uFldNodeCommsHVT)
+// --------------------------------------
+//   stealth_integration=true suppresses CoT for vehicles marked
+//   hidden in HVT_REVEAL_STATE — they vanish from TAK (contact
+//   goes stale after cot_stale_offset) until revealed. Friendly
+//   vehicles always report. Hostiles not (yet) listed in the
+//   reveal state are withheld (fail-safe — assumes the hidden
+//   group covers the hostiles, true for the HVT missions).
+//   When false (default), all locations always report.
+//
 // MOOS INTERFACE
 // --------------
-//   Subscribes: NODE_REPORT, NODE_REPORT_LOCAL
+//   Subscribes: NODE_REPORT, NODE_REPORT_LOCAL, HVT_REVEAL_STATE
 //   Publishes:  COT_OUTBOUND (raw CoT XML)
 // ============================================================
 
@@ -64,11 +74,19 @@ ProcessConfig = pCoTContact
 
   //----------------------------------------------------------
   // team_color — ATAK icon color for friendly contacts.
+  // hostile_team_color — same, for hostile contacts.
   // Controls the <__group name="..."/> element in the CoT.
   // Options: Cyan, Blue, Green, Red, Yellow, White, Magenta, Orange
-  // Hostile contacts never include __group regardless of team_color.
+  //
+  // An empty/omitted color means no __group: the contact renders
+  // from its CoT type (hostile diamond for the red team) and is
+  // map-only (not in ATAK's contacts list). Set
+  // hostile_team_color = Red to instead show the red team as
+  // messageable Red team members (useful for ops monitoring —
+  // they are your own robots playing OPFOR).
   //----------------------------------------------------------
   team_color = Cyan
+  //hostile_team_color = Red
 
   //----------------------------------------------------------
   // immediate — send CoT on every NODE_REPORT, disabling the
@@ -91,6 +109,15 @@ ProcessConfig = pCoTContact
   // rate with margin for minor connectivity hiccups.
   //----------------------------------------------------------
   cot_stale_offset = 10.0   // seconds
+
+  //----------------------------------------------------------
+  // stealth_integration — honor uFldNodeCommsHVT's hidden
+  // status. true = vehicles currently hidden per
+  // HVT_REVEAL_STATE send no CoT and disappear from TAK until
+  // revealed. false (default) = always report all locations.
+  // Only meaningful on a shoreside running uFldNodeCommsHVT.
+  //----------------------------------------------------------
+  stealth_integration = false
 
   debug = false
 }
