@@ -265,6 +265,7 @@ private:
   bool   m_publish_view_points;
   bool   m_publish_view_seglists;
   bool   m_publish_view_polygons;    // VIEW_POLYGON + UTM_ZONE_*
+  bool   m_publish_zone_polygons;    // UTM_ZONE_ONE/TWO team zones only
   bool   m_publish_view_circles;     // VIEW_CIRCLE
   bool   m_immediate_view_circles;   // send VIEW_CIRCLE on every update
   bool   m_publish_flag_markers;     // FLAG_SUMMARY + VIEW_MARKER
@@ -292,6 +293,18 @@ private:
   bool                     m_shoreside_mode;
   std::set<std::string>    m_vehicle_names;
   std::vector<std::string> m_label_block_contains;    // legacy fallback
+  // VIEW_* mail whose MOOS source (source + ":" + source_aux, e.g.
+  // "pHelmIvP:1:opreg") contains any of these substrings is dropped
+  // before parsing. One pattern covers every shape a behavior posts,
+  // regardless of label — labels of behavior viz (cp0..cp8 from the
+  // opregion behavior) are not stable, the posting behavior is.
+  std::vector<std::string> m_source_block_contains;
+  std::vector<std::string> m_label_block_exact;       // whole-label matches,
+                                                      // for short generic
+                                                      // labels ("red","blue")
+                                                      // where a substring
+                                                      // pattern would over-
+                                                      // match
 
   // Polygons whose label contains any of these substrings are forced
   // to unfilled (closed outline only) regardless of fill_color in the

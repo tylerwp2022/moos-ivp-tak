@@ -63,11 +63,14 @@ CoTTrack::CoTTrack()
   m_post_interval = 0.0;    // post on every accepted event
   m_stale_timeout = 30.0;
 
+  m_derive_motion_only = false;
+
   m_debug = false;
 
   m_cot_received   = 0;
   m_cot_accepted   = 0;
   m_cot_loopback   = 0;
+  m_cot_not_listed = 0;
   m_reports_posted = 0;
   m_tracks_dropped = 0;
   m_geo_failures   = 0;
@@ -164,6 +167,20 @@ bool CoTTrack::OnStartUp()
       }
       debugLog("Config: team_map = { " + log_str + "}");
     }
+    else if(param == "vname_map") {
+      // e.g. vname_map = bark:blue_four — that operator's track posts
+      // under the exact vehicle name (no node_prefix), so an ATAK user
+      // can play a standard mission vehicle such as the HVT.
+      string log_str;
+      for(auto& pair : parseString(value, ',')) {
+        string cs    = stripBlankEnds(biteStringX(pair, ':'));
+        string vname = stripBlankEnds(pair);
+        if(cs.empty() || vname.empty()) continue;
+        m_vname_map[cs] = vname;
+        log_str += cs + ">" + vname + " ";
+      }
+      debugLog("Config: vname_map = { " + log_str + "}");
+    }
     else if(param == "node_color") {
       m_node_color = value;
       debugLog("Config: node_color = " + m_node_color);
@@ -212,6 +229,18 @@ bool CoTTrack::OnStartUp()
       }
       debugLog("Config: ignore_callsign = { " + log_str + "}");
     }
+    else if(param == "callsign_whitelist") {
+      // Stored lowercase — ATAK callsigns are free text an operator types
+      // on a phone, so "Delta 1" must match "delta 1".
+      string log_str;
+      for(auto& c : parseString(value, ',')) {
+        string trimmed = stripBlankEnds(c);
+        if(trimmed.empty()) continue;
+        m_allow_calls.push_back(trimmed);
+        log_str += trimmed + " ";
+      }
+      debugLog("Config: callsign_whitelist = { " + log_str + "}");
+    }
     else if(param == "max_tracks") {
       int v = atoi(value.c_str());
       if(v > 0) m_max_tracks = (unsigned int)v;
@@ -248,6 +277,11 @@ bool CoTTrack::OnStartUp()
       m_stale_timeout = atof(value.c_str());
       debugLog("Config: stale_timeout = " +
                doubleToStringX(m_stale_timeout, 1) + "s");
+    }
+    else if(param == "derive_motion_only") {
+      setBooleanOnString(m_derive_motion_only, value);
+      debugLog("Config: derive_motion_only = " +
+               boolToString(m_derive_motion_only));
     }
     else
       handled = false;
@@ -445,6 +479,13 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
     return false;
   }
 
+  if(!isWhitelistedCallsign(callsign)) {
+    m_cot_not_listed++;
+    debugLog("handleInboundCoT: callsign not on whitelist — dropped: " +
+             callsign);
+    return false;
+  }
+
   // New track? Enforce the cap before inserting.
   bool is_new = (m_tracks.find(uid) == m_tracks.end());
   if(is_new && (m_tracks.size() >= m_max_tracks)) {
@@ -476,6 +517,9 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
   // MOOS node name changes — which downstream looks like the old node
   // vanishing and a new one appearing. Worth surfacing, not worth blocking.
   string new_name = m_node_prefix + sanitizeName(callsign);
+  auto vm = m_vname_map.find(tolower(stripBlankEnds(callsign)));
+  if(vm != m_vname_map.end())
+    new_name = vm->second;
   if(!is_new && (new_name != tr.node_name)) {
     reportEvent("pCoTTrack: " + tr.node_name + " renamed to " + new_name);
     retractMarker(tr);
@@ -500,15 +544,18 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
   tr.cot_time   = parseCoTTime(extractElemAttr(xml, "event", "time"));
 
   // <track speed course> when the client supplies it, derived otherwise.
-  string spd_s = extractElemAttr(xml, "track", "speed");
-  string crs_s = extractElemAttr(xml, "track", "course");
-  if(!spd_s.empty() && !crs_s.empty()) {
-    tr.speed           = atof(spd_s.c_str());
-    tr.course          = atof(crs_s.c_str());
-    tr.motion_from_cot = true;
-  }
-  else {
-    tr.motion_from_cot = false;
+  // derive_motion_only skips the element entirely — some clients report a
+  // GPS course that is stale or noisy at walking speed, and deriving from
+  // fixes is then the more trustworthy source.
+  tr.motion_from_cot = false;
+  if(!m_derive_motion_only) {
+    string spd_s = extractElemAttr(xml, "track", "speed");
+    string crs_s = extractElemAttr(xml, "track", "course");
+    if(!spd_s.empty() && !crs_s.empty()) {
+      tr.speed           = atof(spd_s.c_str());
+      tr.course          = atof(crs_s.c_str());
+      tr.motion_from_cot = true;
+    }
   }
 
   // lat/lon → local grid
@@ -751,6 +798,27 @@ bool CoTTrack::isIgnoredCallsign(const std::string& cs) const
 
 
 // ============================================================
+// isWhitelistedCallsign()
+//
+// An empty whitelist means the feature is off and every
+// callsign is admitted — the pre-whitelist behavior. When set,
+// only listed callsigns pass, compared case-insensitively
+// (entries are stored lowercase at config time).
+// ============================================================
+
+bool CoTTrack::isWhitelistedCallsign(const std::string& cs) const
+{
+  if(m_allow_calls.empty()) return true;
+
+  string lc = tolower(cs);
+  for(const auto& c : m_allow_calls) {
+    if(lc == c) return true;
+  }
+  return false;
+}
+
+
+// ============================================================
 // sanitizeName()
 //
 // ATAK callsigns are free text. NODE_REPORT is a comma/equals
@@ -947,11 +1015,26 @@ bool CoTTrack::buildReport()
   string types;
   for(const auto& t : m_track_types) types += t + " ";
   m_msgs << "Ingest types: " << types << endl;
+
+  m_msgs << "Motion source: "
+         << (m_derive_motion_only ? "derived from fixes only"
+                                  : "CoT <track> when present, else derived")
+         << endl;
+
+  if(m_allow_calls.empty()) {
+    m_msgs << "Callsign whitelist: (off — all callsigns admitted)" << endl;
+  }
+  else {
+    string calls;
+    for(const auto& c : m_allow_calls) calls += c + " ";
+    m_msgs << "Callsign whitelist: " << calls << endl;
+  }
   m_msgs << endl;
 
   m_msgs << "CoT inbound seen: " << m_cot_received
          << "   accepted: "      << m_cot_accepted
-         << "   loopback dropped: " << m_cot_loopback << endl;
+         << "   loopback dropped: " << m_cot_loopback
+         << "   not whitelisted: " << m_cot_not_listed << endl;
   m_msgs << "Reports posted: "  << m_reports_posted
          << "   tracks dropped (stale): " << m_tracks_dropped
          << "   geodesy failures: " << m_geo_failures << endl;

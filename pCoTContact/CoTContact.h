@@ -15,8 +15,13 @@
 /*                                                          */
 /*  Single-vehicle (real hardware / one sim vehicle):       */
 /*    own_vehicle = blue_one                                 */
-/*    Tracks only the named vehicle as a friendly contact.  */
-/*    Runs on the robot's own computer in hardware mode.    */
+/*    own_role    = friendly | hostile   (default friendly) */
+/*    Tracks only the named vehicle. Runs on the robot's    */
+/*    own computer in hardware mode. own_role=hostile makes */
+/*    a hidden-group (red) boat honor the stealth rules:    */
+/*    no CoT unless revealed. The HVT features below then   */
+/*    need HVT_REVEAL_STATE / HVT_REVEAL_EVENT /            */
+/*    TAGGED_VEHICLES bridged down from the shoreside.      */
 /*                                                          */
 /*  Multi-vehicle (shoreside sim):                          */
 /*    own_vehicles     = blue_one,blue_two,blue_three        */
@@ -35,7 +40,7 @@
 /*    stationary_send_interval = 3.0s   (default)           */
 /*    speed_threshold          = 0.5 m/s                    */
 /*                                                          */
-/*  Stealth integration (optional, multi-vehicle mode):     */
+/*  Stealth integration (optional, either mode):            */
 /*    stealth_integration = true                            */
 /*    Subscribes to HVT_REVEAL_STATE from uFldNodeCommsHVT  */
 /*    and suppresses CoT for vehicles currently hidden, so  */
@@ -46,9 +51,25 @@
 /*    covers the hostile vehicles.                          */
 /*    Default is false — always report all locations.       */
 /*                                                          */
+/*  Tagged-vehicle hiding (optional):                       */
+/*    hide_tagged = true                                    */
+/*    Friendly vehicles listed in TAGGED_VEHICLES (from     */
+/*    uFldTagManager) stop reporting CoT and disappear from */
+/*    TAK; they reappear if untagged. Hostiles unaffected.  */
+/*                                                          */
+/*  Contact alerts (optional):                              */
+/*    contact_alerts = true                                 */
+/*    On HVT_REVEAL_EVENT (a hidden vehicle discovered),    */
+/*    raises an ATAK "In Contact" emergency alert CoT       */
+/*    (b-a-o-opn) on EVERY friendly vehicle. Alerts track   */
+/*    each boat's position while active and are explicitly  */
+/*    cancelled (b-a-o-can) after contact_alert_duration    */
+/*    seconds — ATAK keeps emergency alerts until cancel.   */
+/*                                                          */
 /*  MOOS Interface:                                         */
 /*    Subscribes: NODE_REPORT, NODE_REPORT_LOCAL,           */
-/*                HVT_REVEAL_STATE                          */
+/*                HVT_REVEAL_STATE, HVT_REVEAL_EVENT,       */
+/*                TAGGED_VEHICLES                           */
 /*    Publishes:  COT_OUTBOUND (raw CoT XML strings)        */
 /************************************************************/
 
@@ -111,6 +132,16 @@ protected:
   void handleRevealState(const std::string& spec);
   bool isHidden(const std::string& name) const;
 
+  // Tagged-vehicle hiding (TAGGED_VEHICLES from uFldTagManager)
+  void handleTaggedVehicles(const std::string& val);
+  bool isTagSuppressed(const std::string& name) const;
+
+  // Discovery alerts (HVT_REVEAL_EVENT from uFldNodeCommsHVT)
+  void handleRevealEvent(const std::string& spec);
+  void processActiveAlerts();
+  std::string buildAlertCoT(const VehicleState& vs);
+  std::string buildAlertCancelCoT(const VehicleState& vs);
+
 private:
   // --------------------------------------------------------
   // Vehicle configuration
@@ -147,6 +178,8 @@ private:
   // its CoT type (hostile diamond for a-h) and is map-only.
   // --------------------------------------------------------
   std::string m_affiliation;         // "f" | "h" | "n" | "u" (default: "f")
+  bool m_affiliation_explicit;       // affiliation config present: it wins
+                                     // over the own_role-derived default
   std::string m_team_color;          // ATAK color for friendlies, or empty
   std::string m_hostile_team_color;  // ATAK color for hostiles,  or empty
 
@@ -168,6 +201,48 @@ private:
   std::map<std::string, bool> m_hidden_map;  // vname -> currently hidden
 
   // --------------------------------------------------------
+  // Tagged-vehicle hiding (uFldTagManager)
+  //
+  // hide_tagged=true: friendly vehicles currently listed in
+  // TAGGED_VEHICLES produce no CoT — a tagged/exploded blue
+  // disappears from TAK (and reappears if untagged). Hostile
+  // vehicles are unaffected; their visibility is governed by
+  // the stealth integration only.
+  // --------------------------------------------------------
+  bool m_hide_tagged;
+  std::set<std::string> m_tagged_set;   // currently tagged vnames
+
+  // Single-vehicle mode: the vehicle's game role (own_role config).
+  // false = hidden-group member (red): with stealth_integration the
+  // boat reports no CoT unless HVT_REVEAL_STATE — bridged down from
+  // the shoreside — lists it as revealed; no In Contact self-alerts;
+  // hostile CoT symbology. Ignored in multi-vehicle mode, where role
+  // comes from own_vehicles/hostile_vehicles.
+  bool m_own_friendly;
+
+  // --------------------------------------------------------
+  // Discovery contact alerts (uFldNodeCommsHVT)
+  //
+  // contact_alerts=true: each HVT_REVEAL_EVENT puts every
+  // friendly vehicle "In Contact" — an ATAK emergency alert
+  // CoT (b-a-o-opn) per blue boat, re-sent each Iterate at
+  // the boat's current position so the alert follows it.
+  // After contact_alert_duration seconds an explicit cancel
+  // CoT (b-a-o-can) clears it — ATAK keeps emergency alerts
+  // on screen until cancelled, staleness is not enough.
+  // --------------------------------------------------------
+  bool   m_contact_alerts;
+  double m_contact_alert_duration;      // seconds (default 3)
+  std::map<std::string, double> m_alert_until;  // vname -> active until
+
+  // A one-shot cancel is fragile: pCoTBridge drops sends while
+  // disconnected, and a TAK client that misses the single packet
+  // keeps the emergency alert on screen forever. Re-send each
+  // cancel every Iterate for contact_alert_cancel_repeat seconds.
+  double m_cancel_repeat;               // seconds (default 5)
+  std::map<std::string, double> m_cancel_until; // vname -> resend until
+
+  // --------------------------------------------------------
   // Debug
   // --------------------------------------------------------
   bool m_debug;
@@ -178,7 +253,8 @@ private:
   // Diagnostics
   // --------------------------------------------------------
   unsigned int m_pos_cot_sent;
-  unsigned int m_pos_cot_suppressed;  // sends skipped while hidden
+  unsigned int m_pos_cot_suppressed;  // sends skipped while hidden/tagged
+  unsigned int m_alert_cot_sent;      // "In Contact" alerts published
 };
 
 #endif // COT_CONTACT_HEADER

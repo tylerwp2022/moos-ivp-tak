@@ -75,6 +75,10 @@ void showExampleConfigAndExit()
   blk("  // VIEW_POLYGON + UTM_ZONE_ONE/TWO → filled or outline polygons");
   blu("  publish_view_polygons  = true                                 ");
   blk("                                                                ");
+  blk("  // UTM_ZONE_ONE/TWO team zone rectangles only (needs         ");
+  blk("  // publish_view_polygons=true to matter)                      ");
+  blu("  publish_zone_polygons  = true                                 ");
+  blk("                                                                ");
   blk("  // VIEW_CIRCLE → circle (u-d-c-c)                            ");
   blu("  publish_view_circles   = true                                 ");
   blk("                                                                ");
@@ -100,6 +104,11 @@ void showExampleConfigAndExit()
   blk("  // vehicle_names = $(VNAMES)                                  ");
   blk("                                                                ");
   blk("  // Legacy fallback: label_block_contains = loiter,opreg,wpt  ");
+  blk("  // Whole-label blocks (for short generic labels a substring   ");
+  blk("  // pattern would over-match): label_block_exact = red,blue    ");
+  blk("  // Block by MOOS source (source:source_aux, e.g.              ");
+  blk("  // \"pHelmIvP:1:opreg\") — one pattern covers every shape a    ");
+  blk("  // behavior posts: source_block_contains = opreg              ");
   blk("                                                                ");
   blu("  debug = false                                                 ");
   blk("}                                                               ");

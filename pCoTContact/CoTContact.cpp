@@ -30,15 +30,23 @@ CoTContact::CoTContact()
 
   m_immediate          = false;
   m_affiliation        = "f";  // default: friendly
+  m_affiliation_explicit = false;
   m_team_color         = "";   // default: no __group (map-only if unset)
   m_hostile_team_color = "";   // default: hostiles render as diamonds
 
   m_stealth_integration   = false;
   m_reveal_state_received = false;
 
+  m_hide_tagged            = false;
+  m_own_friendly           = true;
+  m_contact_alerts         = false;
+  m_contact_alert_duration = 3.0;
+  m_cancel_repeat          = 5.0;
+
   m_debug              = false;
   m_pos_cot_sent       = 0;
   m_pos_cot_suppressed = 0;
+  m_alert_cot_sent     = 0;
 }
 
 
@@ -157,6 +165,7 @@ bool CoTContact::OnStartUp()
     }
     else if(param == "affiliation") {
       m_affiliation = value;
+      m_affiliation_explicit = true;
       if(m_affiliation != "f" && m_affiliation != "h" &&
          m_affiliation != "n" && m_affiliation != "u") {
         reportConfigWarning("pCoTContact: invalid affiliation '" +
@@ -181,10 +190,47 @@ bool CoTContact::OnStartUp()
       setBooleanOnString(m_immediate, value);
       debugLog("Config: immediate = " + boolToString(m_immediate));
     }
+    else if(param == "own_role") {
+      // Single-vehicle mode only: the vehicle's game role, so the
+      // HVT features work on a boat that reports itself to TAK.
+      //   friendly (default) — always reports; gets In Contact
+      //     alerts; hidden by hide_tagged while tagged.
+      //   hostile — hidden-group member: with stealth_integration,
+      //     reports NO CoT unless HVT_REVEAL_STATE (bridged from
+      //     the shoreside) lists it as revealed. Fail-safe: no
+      //     state received = no leak. Uses hostile CoT symbology.
+      string v = tolower(stripBlankEnds(value));
+      if((v == "hostile") || (v == "red"))
+        m_own_friendly = false;
+      else if((v == "friendly") || (v == "blue"))
+        m_own_friendly = true;
+      else
+        reportConfigWarning("pCoTContact: bad own_role: " + value);
+      debugLog("Config: own_role = " +
+               string(m_own_friendly ? "friendly" : "hostile"));
+    }
     else if(param == "stealth_integration") {
       setBooleanOnString(m_stealth_integration, value);
       debugLog("Config: stealth_integration = " +
                boolToString(m_stealth_integration));
+    }
+    else if(param == "hide_tagged") {
+      setBooleanOnString(m_hide_tagged, value);
+      debugLog("Config: hide_tagged = " + boolToString(m_hide_tagged));
+    }
+    else if(param == "contact_alerts") {
+      setBooleanOnString(m_contact_alerts, value);
+      debugLog("Config: contact_alerts = " + boolToString(m_contact_alerts));
+    }
+    else if(param == "contact_alert_duration") {
+      m_contact_alert_duration = atof(value.c_str());
+      debugLog("Config: contact_alert_duration = " +
+               doubleToStringX(m_contact_alert_duration) + "s");
+    }
+    else if(param == "contact_alert_cancel_repeat") {
+      m_cancel_repeat = atof(value.c_str());
+      debugLog("Config: contact_alert_cancel_repeat = " +
+               doubleToStringX(m_cancel_repeat) + "s");
     }
     else
       handled = false;
@@ -227,6 +273,10 @@ void CoTContact::registerVariables()
   Register("NODE_REPORT_LOCAL", 0);
   if(m_stealth_integration)
     Register("HVT_REVEAL_STATE", 0);
+  if(m_hide_tagged)
+    Register("TAGGED_VEHICLES", 0);
+  if(m_contact_alerts)
+    Register("HVT_REVEAL_EVENT", 0);
 }
 
 
@@ -243,6 +293,12 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
     if(key == "HVT_REVEAL_STATE") {
       handleRevealState(msg.m_sVal);
     }
+    else if(key == "TAGGED_VEHICLES") {
+      handleTaggedVehicles(msg.m_sVal);
+    }
+    else if(key == "HVT_REVEAL_EVENT") {
+      handleRevealEvent(msg.m_sVal);
+    }
     else if(key == "NODE_REPORT" || key == "NODE_REPORT_LOCAL") {
       if(!parseNodeReport(msg.m_sVal)) continue;
       if(!m_immediate) continue;
@@ -253,7 +309,7 @@ bool CoTContact::OnNewMail(MOOSMSG_LIST &NewMail)
       }
       auto it = m_vehicles.find(name);
       if(it != m_vehicles.end() && it->second.valid) {
-        if(isHidden(name)) {
+        if(isHidden(name) || isTagSuppressed(name)) {
           m_pos_cot_suppressed++;
           continue;
         }
@@ -288,9 +344,9 @@ bool CoTContact::Iterate()
       if((m_curr_time - vs.last_sent) < interval) continue;
     }
 
-    // Stealth: withhold this send slot; last_sent still advances so
-    // the suppressed counter ticks at the send cadence, not AppTick.
-    if(isHidden(vs.name)) {
+    // Stealth/tagged: withhold this send slot; last_sent still advances
+    // so the suppressed counter ticks at the send cadence, not AppTick.
+    if(isHidden(vs.name) || isTagSuppressed(vs.name)) {
       vs.last_sent = m_curr_time;
       m_pos_cot_suppressed++;
       continue;
@@ -303,6 +359,9 @@ bool CoTContact::Iterate()
              string(m_immediate ? " [immediate]" :
                     (vs.speed > m_speed_threshold ? " [moving]" : " [static]")));
   }
+
+  if(m_contact_alerts)
+    processActiveAlerts();
 
   AppCastingMOOSApp::PostReport();
   return true;
@@ -331,7 +390,7 @@ bool CoTContact::isFriendly(const std::string& name) const
   if(m_multi_mode)
     return (m_own_set.count(name) > 0);
   else
-    return true; // single-vehicle mode is always own vehicle
+    return m_own_friendly; // single-vehicle mode: own_role config
 }
 
 
@@ -396,6 +455,220 @@ bool CoTContact::isHidden(const std::string& name) const
 
 
 // ============================================================
+// handleTaggedVehicles()
+//
+// Parses TAGGED_VEHICLES from uFldTagManager — a comma list of
+// currently tagged vehicle names, republished on every change
+// (empty string when nobody is tagged).
+// ============================================================
+
+void CoTContact::handleTaggedVehicles(const std::string& val)
+{
+  set<string> new_set;
+  for(auto& tok : parseString(val, ',')) {
+    string vname = tolower(stripBlankEnds(tok));
+    if(!vname.empty())
+      new_set.insert(vname);
+  }
+
+  for(auto& vname : new_set)
+    if(m_tagged_set.count(vname) == 0)
+      debugLog("Tagged: " + vname);
+  for(auto& vname : m_tagged_set)
+    if(new_set.count(vname) == 0)
+      debugLog("Untagged: " + vname);
+
+  m_tagged_set = new_set;
+}
+
+
+// ============================================================
+// isTagSuppressed()
+//
+// True if the vehicle's CoT should be withheld because it has
+// been tagged/exploded. Applies to friendly vehicles only —
+// hostile visibility is governed by the stealth integration.
+// ============================================================
+
+bool CoTContact::isTagSuppressed(const std::string& name) const
+{
+  if(!m_hide_tagged)
+    return false;
+  if(!isFriendly(name))
+    return false;
+  return (m_tagged_set.count(tolower(name)) > 0);
+}
+
+
+// ============================================================
+// handleRevealEvent()
+//
+// Parses HVT_REVEAL_EVENT from uFldNodeCommsHVT:
+//   vname=red_one,observer=blue_one,why=seen by blue_one at 179.8m
+// A discovery puts the whole friendly team "In Contact": raises
+// an alert on every tracked friendly vehicle for
+// contact_alert_duration seconds. processActiveAlerts() keeps
+// each alert at its boat's position and cancels it on expiry.
+// ============================================================
+
+void CoTContact::handleRevealEvent(const std::string& spec)
+{
+  string observer;
+  for(auto& tok : parseString(spec, ',')) {
+    string t = tok;
+    if(tolower(biteStringX(t, '=')) == "observer") {
+      observer = stripBlankEnds(t);
+      break;
+    }
+  }
+
+  unsigned int raised = 0;
+  for(auto& kv : m_vehicles) {
+    VehicleState& vs = kv.second;
+    if(!vs.valid || !vs.friendly)
+      continue;
+    if(m_alert_until.find(vs.name) == m_alert_until.end()) {
+      Notify("COT_OUTBOUND", buildAlertCoT(vs));
+      m_alert_cot_sent++;
+    }
+    m_alert_until[vs.name] = m_curr_time + m_contact_alert_duration;
+    // A pending cancel resend would clear the fresh alert (same uid).
+    m_cancel_until.erase(vs.name);
+    raised++;
+  }
+
+  debugLog("RevealEvent: In Contact (by " +
+           (observer.empty() ? string("?") : observer) + ") — " +
+           intToString(raised) + " alerts raised");
+}
+
+
+// ============================================================
+// processActiveAlerts()
+//
+// Called each Iterate. Active alerts are re-sent at the boat's
+// current position (same uid, so ATAK moves the alert with the
+// boat). Expired alerts get an explicit cancel CoT — ATAK keeps
+// emergency alerts on screen until cancelled.
+// ============================================================
+
+void CoTContact::processActiveAlerts()
+{
+  for(auto it = m_alert_until.begin(); it != m_alert_until.end(); ) {
+    auto vit = m_vehicles.find(it->first);
+    if(vit == m_vehicles.end()) {
+      it = m_alert_until.erase(it);
+      continue;
+    }
+    // A boat that went invalid (stale, tagged) still has its alert on
+    // TAK screens — cancel at the last known position rather than
+    // dropping the entry with the alert stranded.
+    if(!vit->second.valid || m_curr_time >= it->second) {
+      Notify("COT_OUTBOUND", buildAlertCancelCoT(vit->second));
+      debugLog("Alert cancelled for " + it->first);
+      m_cancel_until[it->first] = m_curr_time + m_cancel_repeat;
+      it = m_alert_until.erase(it);
+    }
+    else {
+      Notify("COT_OUTBOUND", buildAlertCoT(vit->second));
+      ++it;
+    }
+  }
+
+  // Keep re-sending each cancel until its window closes — see
+  // m_cancel_repeat in the header.
+  for(auto it = m_cancel_until.begin(); it != m_cancel_until.end(); ) {
+    if(m_curr_time >= it->second) {
+      it = m_cancel_until.erase(it);
+      continue;
+    }
+    auto vit = m_vehicles.find(it->first);
+    if(vit != m_vehicles.end())
+      Notify("COT_OUTBOUND", buildAlertCancelCoT(vit->second));
+    ++it;
+  }
+}
+
+
+// ============================================================
+// buildAlertCoT()
+//
+// ATAK "In Contact" emergency alert (b-a-o-opn) at the boat's
+// current position. The <link> uid references the vehicle's SA
+// contact (surveyor-<name>) so ATAK associates the alert with
+// the plotted contact. Re-sends reuse the same uid
+// (<name>-9-1-1), so the alert follows the boat. The stale time
+// is only a fallback — removal is via buildAlertCancelCoT().
+// ============================================================
+
+string CoTContact::buildAlertCoT(const VehicleState& vs)
+{
+  string t_now   = formatCoTTime(m_curr_time, 0.0);
+  string t_stale = formatCoTTime(m_curr_time, m_contact_alert_duration + 10.0);
+
+  return
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<event"
+      " version=\"2.0\""
+      " uid=\""   + vs.name + "-9-1-1\""
+      " type=\"b-a-o-opn\""
+      " how=\"h-e\""
+      " time=\""  + t_now   + "\""
+      " start=\"" + t_now   + "\""
+      " stale=\"" + t_stale + "\""
+      " access=\"Undefined\">"
+    "<point"
+      " lat=\"" + doubleToStringX(vs.lat, 7) + "\""
+      " lon=\"" + doubleToStringX(vs.lon, 7) + "\""
+      " hae=\"0.0\""
+      " ce=\"9999999.0\" le=\"9999999.0\"/>"
+    "<detail>"
+      "<contact callsign=\"" + vs.name + "-Alert\"/>"
+      "<link uid=\"surveyor-" + vs.name + "\""
+           " type=\"a-f-S-C-U-N\" relation=\"p-p\"/>"
+      "<emergency type=\"In Contact\">" + vs.name + "</emergency>"
+    "</detail>"
+    "</event>";
+}
+
+
+// ============================================================
+// buildAlertCancelCoT()
+//
+// Emergency cancel (b-a-o-can) for the vehicle's In Contact
+// alert. Same uid as the alert; <emergency cancel="true"> is
+// what actually removes the alert from ATAK.
+// ============================================================
+
+string CoTContact::buildAlertCancelCoT(const VehicleState& vs)
+{
+  string t_now   = formatCoTTime(m_curr_time, 0.0);
+  string t_stale = formatCoTTime(m_curr_time, 300.0);
+
+  return
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<event"
+      " version=\"2.0\""
+      " uid=\""   + vs.name + "-9-1-1\""
+      " type=\"b-a-o-can\""
+      " how=\"h-e\""
+      " time=\""  + t_now   + "\""
+      " start=\"" + t_now   + "\""
+      " stale=\"" + t_stale + "\""
+      " access=\"Undefined\">"
+    "<point"
+      " lat=\"" + doubleToStringX(vs.lat, 7) + "\""
+      " lon=\"" + doubleToStringX(vs.lon, 7) + "\""
+      " hae=\"0.0\""
+      " ce=\"9999999.0\" le=\"9999999.0\"/>"
+    "<detail>"
+      "<emergency cancel=\"true\">" + vs.name + "</emergency>"
+    "</detail>"
+    "</event>";
+}
+
+
+// ============================================================
 // parseNodeReport()
 //
 // Parses NAME=...,LAT=...,LON=...,HDG=...,SPD=...,TIME=...
@@ -408,7 +681,7 @@ bool CoTContact::parseNodeReport(const std::string& report)
 {
   bool got_name = false, got_lat = false, got_lon = false;
   bool got_hdg  = false, got_spd = false, got_time = false;
-  string name;
+  string name, vsource;
   double lat = 0, lon = 0, hdg = 0, spd = 0, t = 0;
 
   for(auto& tok : parseString(report, ',')) {
@@ -421,10 +694,20 @@ bool CoTContact::parseNodeReport(const std::string& report)
     else if(key == "HDG")  { hdg  = atof(val.c_str()); got_hdg  = true; }
     else if(key == "SPD")  { spd  = atof(val.c_str()); got_spd  = true; }
     else if(key == "TIME") { t    = atof(val.c_str()); got_time = true; }
+    else if(key == "VSOURCE") { vsource = tolower(val); }
   }
 
   if(!got_name || !got_lat || !got_lon || !got_hdg || !got_spd || !got_time)
     return false;
+
+  // Never echo a TAK-origin track back to TAK. Matters when a
+  // pCoTTrack vname_map posts an ATAK operator under a mission
+  // vehicle name (e.g. blue_four) that is in our roster — the
+  // operator's own ATAK self-marker is already on every screen.
+  if(vsource == "pcottrack") {
+    debugLog("parseNodeReport: ignoring " + name + " (TAK-origin track)");
+    return false;
+  }
 
   // Auto-learn vehicle name in single-vehicle mode if not configured
   if(!m_multi_mode && m_own_vehicle.empty()) {
@@ -476,10 +759,15 @@ bool CoTContact::parseNodeReport(const std::string& report)
 string CoTContact::buildPositionCoT(const VehicleState& vs)
 {
   // In multi-vehicle mode, affiliation comes from own_set/hostile_set.
-  // In single-vehicle mode, it comes from the m_affiliation config param.
-  string affil = m_multi_mode
-    ? (vs.friendly ? "f" : "h")
-    : m_affiliation;
+  // In single-vehicle mode, an explicit affiliation config wins;
+  // otherwise it follows own_role (hostile boats report a-h-...).
+  string affil;
+  if(m_multi_mode)
+    affil = vs.friendly ? "f" : "h";
+  else if(m_affiliation_explicit)
+    affil = m_affiliation;
+  else
+    affil = m_own_friendly ? "f" : "h";
 
   string cot_type = "a-" + affil + "-S-C-U-N";
   string uid      = "surveyor-" + vs.name;
@@ -540,9 +828,13 @@ string CoTContact::buildPositionCoT(const VehicleState& vs)
 // formatCoTTime()
 // ============================================================
 
-string CoTContact::formatCoTTime(double moos_time, double offset)
+string CoTContact::formatCoTTime(double /*moos_time*/, double offset)
 {
-  time_t t = (time_t)(moos_time + offset);
+  // Real wall-clock UTC, deliberately NOT the passed MOOS time:
+  // under sim time warp MOOSTime runs decades fast (a warp-3
+  // vehicle community stamps year-2139 events), and TAK clients
+  // silently discard events with far-future times.
+  time_t t = time(0) + (time_t)offset;
   struct tm* utc = gmtime(&t);
   char buf[32];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", utc);
@@ -568,8 +860,28 @@ bool CoTContact::buildReport()
                                        : "awaiting HVT_REVEAL_STATE — "
                                          "hostiles withheld")
            << ")" << endl;
+  if(m_hide_tagged) {
+    m_msgs << "Hide tagged: ON  tagged={";
+    string sep = "";
+    for(auto& vname : m_tagged_set) {
+      m_msgs << sep << vname;
+      sep = ",";
+    }
+    m_msgs << "}" << endl;
+  }
+  if(m_contact_alerts) {
+    m_msgs << "Contact alerts: ON  raised: " << m_alert_cot_sent
+           << "  (duration " << doubleToStringX(m_contact_alert_duration, 0)
+           << "s)  active={";
+    string sep = "";
+    for(auto& kv : m_alert_until) {
+      m_msgs << sep << kv.first;
+      sep = ",";
+    }
+    m_msgs << "}" << endl;
+  }
   m_msgs << "CoT sent: " << m_pos_cot_sent;
-  if(m_stealth_integration)
+  if(m_stealth_integration || m_hide_tagged)
     m_msgs << "  suppressed: " << m_pos_cot_suppressed;
   m_msgs << endl;
   m_msgs << endl;
@@ -582,7 +894,8 @@ bool CoTContact::buildReport()
     bool   moving = (vs.speed > m_speed_threshold);
     m_msgs << "  " << vs.name
            << (vs.friendly ? " [own]" : " [opp]")
-           << (isHidden(vs.name) ? " [HIDDEN]" : "")
+           << (isHidden(vs.name)       ? " [HIDDEN]" : "")
+           << (isTagSuppressed(vs.name) ? " [TAGGED]" : "")
            << (moving      ? " MOV"   : " STA")
            << (stale ? " STALE(" + doubleToStringX(age, 1) + "s)" : "")
            << "  lat=" << doubleToStringX(vs.lat, 6)

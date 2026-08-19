@@ -39,9 +39,28 @@
 //   group covers the hostiles, true for the HVT missions).
 //   When false (default), all locations always report.
 //
+// TAGGED-VEHICLE HIDING (uFldTagManager)
+// --------------------------------------
+//   hide_tagged=true makes friendly vehicles listed in
+//   TAGGED_VEHICLES stop reporting — a tagged/exploded blue
+//   disappears from TAK (stale after cot_stale_offset) and
+//   reappears if untagged. Hostiles are unaffected.
+//
+// DISCOVERY CONTACT ALERTS (uFldNodeCommsHVT)
+// -------------------------------------------
+//   contact_alerts=true: each HVT_REVEAL_EVENT (a hidden red
+//   discovered) puts the whole friendly team "In Contact" — an
+//   ATAK emergency alert (b-a-o-opn) on every blue boat, linked
+//   to its SA contact. Active alerts are re-sent each Iterate
+//   at the boat's current position so they follow the boats.
+//   After contact_alert_duration seconds (default 3) each alert
+//   is removed with an explicit cancel CoT (b-a-o-can) — ATAK
+//   keeps emergency alerts on screen until cancelled.
+//
 // MOOS INTERFACE
 // --------------
-//   Subscribes: NODE_REPORT, NODE_REPORT_LOCAL, HVT_REVEAL_STATE
+//   Subscribes: NODE_REPORT, NODE_REPORT_LOCAL,
+//               HVT_REVEAL_STATE, HVT_REVEAL_EVENT, TAGGED_VEHICLES
 //   Publishes:  COT_OUTBOUND (raw CoT XML)
 // ============================================================
 
@@ -119,6 +138,28 @@ ProcessConfig = pCoTContact
   //----------------------------------------------------------
   stealth_integration = false
 
+  //----------------------------------------------------------
+  // hide_tagged — friendly vehicles listed in TAGGED_VEHICLES
+  // (uFldTagManager) stop reporting and vanish from TAK until
+  // untagged. Hostiles are unaffected.
+  //----------------------------------------------------------
+  hide_tagged = false
+
+  //----------------------------------------------------------
+  // contact_alerts — on each discovery of a hidden opponent
+  // (HVT_REVEAL_EVENT from uFldNodeCommsHVT), raise an ATAK
+  // "In Contact" emergency alert on every friendly vehicle,
+  // following the boats, cancelled after the duration.
+  //----------------------------------------------------------
+  contact_alerts         = false
+  contact_alert_duration = 3   // seconds until the alert cancels
+
+  // Cancel CoTs are re-sent every Iterate for this long — a one-shot
+  // cancel is lost forever if the bridge is disconnected or a TAK
+  // client misses the packet, and ATAK keeps emergency alerts on
+  // screen until cancelled.
+  contact_alert_cancel_repeat = 5   // seconds
+
   debug = false
 }
 
@@ -149,6 +190,15 @@ ProcessConfig = pCoTContact
 //   // Set to the RNAME of this robot (e.g. blue_one).
 //   // In wp_2025 missions this is passed via nsplug: $(RNAME)
 //   own_vehicle = blue_one
+//
+//   // own_role — this vehicle's HVT game role (default: friendly).
+//   // hostile = hidden-group member: with stealth_integration the
+//   // boat posts NO position CoT unless HVT_REVEAL_STATE (bridged
+//   // down from the shoreside broker) lists it as revealed; no
+//   // In Contact self-alerts; hostile CoT symbology. Fail-safe:
+//   // if the shore link drops, nothing leaks. Set via nsplug:
+//   //   #ifdef VTEAM red / own_role = hostile / #else friendly
+//   own_role = friendly
 //
 //   // Affiliation and team_color — set per team via nsplug #ifdef VTEAM.
 //   // Combinations and their ATAK behavior:

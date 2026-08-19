@@ -36,6 +36,7 @@ CoTGraphics::CoTGraphics()
   m_publish_view_points      = true;
   m_publish_view_seglists    = true;
   m_publish_view_polygons    = true;
+  m_publish_zone_polygons    = true;
   m_publish_view_circles     = true;
   m_immediate_view_circles   = false;
   m_publish_flag_markers     = true;
@@ -119,6 +120,8 @@ bool CoTGraphics::OnStartUp()
       setBooleanOnString(m_publish_view_seglists, value);
     else if(param == "publish_view_polygons")
       setBooleanOnString(m_publish_view_polygons, value);
+    else if(param == "publish_zone_polygons")
+      setBooleanOnString(m_publish_zone_polygons, value);
     else if(param == "publish_view_circles")
       setBooleanOnString(m_publish_view_circles, value);
     else if(param == "publish_flag_markers")
@@ -166,6 +169,27 @@ bool CoTGraphics::OnStartUp()
       }
       debugLog("Config: label_block_contains — " +
                intToString((int)m_label_block_contains.size()) + " patterns");
+    }
+    else if(param == "source_block_contains") {
+      // Substring patterns matched against the poster's MOOS source
+      // (source + ":" + source_aux). E.g. "opreg" drops everything
+      // the opregion behavior posts (cp0..cp8 polys, opborder).
+      for(auto& tok : parseString(value, ',')) {
+        string s = stripBlankEnds(tok);
+        if(!s.empty()) m_source_block_contains.push_back(s);
+      }
+      debugLog("Config: source_block_contains — " +
+               intToString((int)m_source_block_contains.size()) + " patterns");
+    }
+    else if(param == "label_block_exact") {
+      // Whole-label matches, for short generic labels ("red", "blue")
+      // where a substring pattern would over-match.
+      for(auto& tok : parseString(value, ',')) {
+        string s = stripBlankEnds(tok);
+        if(!s.empty()) m_label_block_exact.push_back(s);
+      }
+      debugLog("Config: label_block_exact — " +
+               intToString((int)m_label_block_exact.size()) + " labels");
     }
     else if(param == "label_force_unfilled_contains") {
       // Polygons whose label contains any of these substrings are
@@ -227,8 +251,10 @@ void CoTGraphics::registerVariables()
   if(m_publish_view_seglists) Register("VIEW_SEGLIST", 0);
   if(m_publish_view_polygons) {
     Register("VIEW_POLYGON",  0);
-    Register("UTM_ZONE_ONE",  0);
-    Register("UTM_ZONE_TWO",  0);
+    if(m_publish_zone_polygons) {
+      Register("UTM_ZONE_ONE",  0);
+      Register("UTM_ZONE_TWO",  0);
+    }
   }
   if(m_publish_view_circles)  Register("VIEW_CIRCLE",  0);
 
@@ -258,6 +284,28 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
   for(auto& msg : NewMail) {
     string key  = msg.m_sKey;
     string sval = msg.m_sVal;
+
+    // --------------------------------------------------------
+    // Source blocking — drop VIEW_* mail from blocked posters
+    // before any parsing (see m_source_block_contains).
+    // --------------------------------------------------------
+    if(!m_source_block_contains.empty() &&
+       (key.compare(0, 5, "VIEW_") == 0)) {
+      // Lowercased match: config values arrive lowercased, and app
+      // names in the source are mixed-case (e.g. "uXboxJoystick").
+      string src = tolower(msg.GetSource() + ":" + msg.GetSourceAux());
+      bool src_blocked = false;
+      for(const auto& pattern : m_source_block_contains) {
+        if(src.find(tolower(pattern)) != string::npos) {
+          src_blocked = true;
+          break;
+        }
+      }
+      if(src_blocked) {
+        debugLog(key + ": blocked source=" + src);
+        continue;
+      }
+    }
 
     // --------------------------------------------------------
     // NODE_REPORT — update geodesy NAV anchor
@@ -354,7 +402,8 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     // UTM_ZONE_ONE — red team zone boundary
     // map_key="zone_red" avoids collision with flag label "red"
     // --------------------------------------------------------
-    else if(key == "UTM_ZONE_ONE" && m_publish_view_polygons) {
+    else if(key == "UTM_ZONE_ONE" && m_publish_view_polygons &&
+            m_publish_zone_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "zone_red")) {
         bool is_new = !m_view_polygons.count("zone_red");
@@ -368,7 +417,8 @@ bool CoTGraphics::OnNewMail(MOOSMSG_LIST &NewMail)
     // --------------------------------------------------------
     // UTM_ZONE_TWO — blue team zone boundary
     // --------------------------------------------------------
-    else if(key == "UTM_ZONE_TWO" && m_publish_view_polygons) {
+    else if(key == "UTM_ZONE_TWO" && m_publish_view_polygons &&
+            m_publish_zone_polygons) {
       ViewPolygon vp;
       if(parseViewPolygon(sval, vp, "zone_blue")) {
         bool is_new = !m_view_polygons.count("zone_blue");
@@ -1192,6 +1242,12 @@ bool CoTGraphics::isLabelBlocked(const std::string& label,
       return true;
   }
 
+  // Whole-label matches (applies to all types)
+  for(const auto& blocked : m_label_block_exact) {
+    if(label == blocked)
+      return true;
+  }
+
   return false;
 }
 
@@ -1513,9 +1569,12 @@ string CoTGraphics::buildDeleteCoT(const std::string& target_uid,
 // formatCoTTime()
 // ============================================================
 
-string CoTGraphics::formatCoTTime(double moos_time, double offset)
+string CoTGraphics::formatCoTTime(double /*moos_time*/, double offset)
 {
-  time_t t = (time_t)(moos_time + offset);
+  // Real wall-clock UTC, deliberately NOT the passed MOOS time:
+  // under sim time warp MOOSTime runs decades fast, and TAK
+  // clients silently discard events with far-future times.
+  time_t t = time(0) + (time_t)offset;
   struct tm* utc = gmtime(&t);
   char buf[32];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", utc);

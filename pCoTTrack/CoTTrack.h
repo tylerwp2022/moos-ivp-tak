@@ -37,6 +37,10 @@
 /*  GOTO waypoints, chat, graphics — is ignored here and    */
 /*  left to pCoTCommander and pCoTChat.                     */
 /*                                                          */
+/*  A callsign_whitelist further narrows ingest: when set,  */
+/*  only the listed callsigns (case-insensitive) are        */
+/*  tracked. Empty (the default) admits all callsigns.      */
+/*                                                          */
 /*  LOOPBACK SUPPRESSION                                    */
 /*  -------------------------------------------------------- */
 /*  A TAK server echoes back everything this MOOS community  */
@@ -179,6 +183,7 @@ protected:
   bool matchesTrackType(const std::string& type) const;
   bool isIgnoredUid(const std::string& uid)      const;
   bool isIgnoredCallsign(const std::string& cs)  const;
+  bool isWhitelistedCallsign(const std::string& cs) const;
 
   // ---- small XML helpers (CoT is regular enough not to need a parser) ----
   static std::string extractAttr(const std::string& xml,
@@ -212,6 +217,13 @@ private:
   // turns that color into the game team, keyed lowercase.
   bool m_group_from_team;                          // use team_map at all
   std::map<std::string, std::string> m_team_map;   // "dark blue" → "blue"
+
+  // vname_map: callsign → exact MOOS vehicle name, posted verbatim
+  // (no node_prefix). Lets a real ATAK operator stand in for a
+  // standard mission vehicle (e.g. the HVT blue_four) so nothing
+  // mission-side has to be renamed. Keys stored lowercase; matched
+  // against the lowercased callsign.
+  std::map<std::string, std::string> m_vname_map;
   std::string m_node_color;      // NODE_REPORT COLOR=
   double      m_node_length;     // NODE_REPORT LENGTH= (meters)
   bool        m_lowercase_names; // fold node names to lower case
@@ -222,6 +234,8 @@ private:
   std::vector<std::string> m_track_types;    // CoT type prefixes to accept
   std::vector<std::string> m_ignore_uids;    // uid prefixes to drop
   std::vector<std::string> m_ignore_calls;   // exact callsigns to drop
+  std::vector<std::string> m_allow_calls;    // callsign whitelist, stored
+                                             // lowercase; empty = allow all
   unsigned int             m_max_tracks;     // cap on concurrent tracks
 
   // --------------------------------------------------------
@@ -239,6 +253,12 @@ private:
   double m_post_interval;  // min seconds between NODE_REPORTs per track;
                             // 0 = post on every accepted CoT event
   double m_stale_timeout;  // seconds without CoT before a track is dropped
+
+  // --------------------------------------------------------
+  // Motion source
+  // --------------------------------------------------------
+  bool m_derive_motion_only; // ignore <track> in the CoT; always derive
+                             // speed/course from successive fixes
 
   // --------------------------------------------------------
   // State
@@ -259,6 +279,7 @@ private:
   unsigned int m_cot_received;    // COT_INBOUND messages seen
   unsigned int m_cot_accepted;    // matched the type filter, had a position
   unsigned int m_cot_loopback;    // dropped by the uid/callsign filters
+  unsigned int m_cot_not_listed;  // dropped by the callsign whitelist
   unsigned int m_reports_posted;  // NODE_REPORTs published
   unsigned int m_tracks_dropped;  // tracks expired on stale_timeout
   unsigned int m_geo_failures;    // lat/lon → XY conversions that failed

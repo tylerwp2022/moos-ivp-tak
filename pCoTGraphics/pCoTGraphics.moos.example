@@ -39,6 +39,11 @@ ProcessConfig = pCoTGraphics
   // explicit in the source string. UTM_ZONE_* always filled.
   publish_view_polygons = true
 
+  // UTM_ZONE_ONE/TWO team zone rectangles only; set false to keep
+  // VIEW_POLYGONs while suppressing the zone bounds on TAK.
+  // (Needs publish_view_polygons=true to matter.)
+  publish_zone_polygons = true
+
   // ---- VIEW_CIRCLE → CoT circle (u-d-c-c) ----
   // pHelmIvP loiter regions, tag zone radii, custom geometry.
   // Radius in meters. Edge/fill color from VIEW_CIRCLE string.
