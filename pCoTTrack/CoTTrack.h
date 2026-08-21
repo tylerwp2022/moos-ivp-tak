@@ -125,10 +125,13 @@ struct TakTrack {
 
   // Motion. ATAK normally supplies <track speed course>, but not every
   // client does, and a stationary client may omit it. When absent the
-  // values are derived from successive fixes (see deriveMotion).
-  double speed           = 0.0;  // m/s
-  double course          = 0.0;  // degrees true
-  bool   motion_from_cot = false;// false = derived from position deltas
+  // values are derived from successive fixes (see deriveMotion). Speed
+  // and heading are tracked separately because heading_source=gps takes
+  // the course from fixes even when the CoT <track> element is present.
+  double speed            = 0.0;  // m/s
+  double course           = 0.0;  // degrees true
+  bool   motion_from_cot  = false;// false = speed derived from position deltas
+  bool   heading_from_cot = false;// false = course derived from position deltas
 
   // Timing. cot_time is the sender's clock and is kept for diagnostics
   // only — NODE_REPORT TIME uses the local MOOS clock (see postTrack).
@@ -259,6 +262,12 @@ private:
   // --------------------------------------------------------
   bool m_derive_motion_only; // ignore <track> in the CoT; always derive
                              // speed/course from successive fixes
+
+  // Where HDG comes from when the CoT does carry <track course>:
+  //   "cot" (default) — use the course the ATAK client reports
+  //   "gps"           — always derive heading from consecutive fixes
+  // Speed is unaffected; derive_motion_only=true overrides both.
+  std::string m_heading_source;
 
   // --------------------------------------------------------
   // State

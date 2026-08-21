@@ -112,6 +112,11 @@ void showExampleConfigAndExit()
   blk("  // derive speed/heading from successive position fixes.      ");
   blk("  // false (default) = use <track> when the client sends it.   ");
   blu("  derive_motion_only = false                                    ");
+  blk("  // Where HDG comes from when the CoT carries <track course>: ");
+  blk("  //   cot (default) = the course the ATAK client reports      ");
+  blk("  //   gps = always derive heading from consecutive GPS fixes  ");
+  blk("  // Speed is unaffected; derive_motion_only overrides both.   ");
+  blu("  heading_source = cot                                          ");
   blk("                                                                ");
   blk("  // ---- rates ----                                           ");
   blk("  // 0 = post on every inbound CoT, plus each AppTick as a     ");
@@ -165,7 +170,8 @@ void showInterfaceAndExit()
   blk("                                                                ");
   blk("  Speed and heading come from <track speed course> when the     ");
   blk("  client sends it, and are derived from successive fixes when   ");
-  blk("  it does not.                                                  ");
+  blk("  it does not. heading_source=gps forces the heading (only) to  ");
+  blk("  be derived from fixes even when <track course> is present.    ");
   blk("                                                                ");
   blk("  A PLI reporting lat=0 lon=0 (no GPS fix) is discarded rather  ");
   blk("  than placed on the map.                                       ");

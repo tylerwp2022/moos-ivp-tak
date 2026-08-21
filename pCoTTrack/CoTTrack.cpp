@@ -64,6 +64,7 @@ CoTTrack::CoTTrack()
   m_stale_timeout = 30.0;
 
   m_derive_motion_only = false;
+  m_heading_source     = "cot";
 
   m_debug = false;
 
@@ -282,6 +283,15 @@ bool CoTTrack::OnStartUp()
       setBooleanOnString(m_derive_motion_only, value);
       debugLog("Config: derive_motion_only = " +
                boolToString(m_derive_motion_only));
+    }
+    else if(param == "heading_source") {
+      string v = stripBlankEnds(value);
+      if((v == "cot") || (v == "gps"))
+        m_heading_source = v;
+      else
+        reportConfigWarning("pCoTTrack: heading_source must be cot or gps, "
+                            "got: " + v);
+      debugLog("Config: heading_source = " + m_heading_source);
     }
     else
       handled = false;
@@ -546,15 +556,21 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
   // <track speed course> when the client supplies it, derived otherwise.
   // derive_motion_only skips the element entirely — some clients report a
   // GPS course that is stale or noisy at walking speed, and deriving from
-  // fixes is then the more trustworthy source.
-  tr.motion_from_cot = false;
+  // fixes is then the more trustworthy source. heading_source=gps is the
+  // narrower version of the same idea: keep the client's speed but take
+  // the heading from consecutive fixes.
+  tr.motion_from_cot  = false;
+  tr.heading_from_cot = false;
   if(!m_derive_motion_only) {
     string spd_s = extractElemAttr(xml, "track", "speed");
     string crs_s = extractElemAttr(xml, "track", "course");
     if(!spd_s.empty() && !crs_s.empty()) {
       tr.speed           = atof(spd_s.c_str());
-      tr.course          = atof(crs_s.c_str());
       tr.motion_from_cot = true;
+      if(m_heading_source == "cot") {
+        tr.course          = atof(crs_s.c_str());
+        tr.heading_from_cot = true;
+      }
     }
   }
 
@@ -571,7 +587,7 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
              " held without XY");
   }
 
-  if(!tr.motion_from_cot)
+  if(!tr.motion_from_cot || !tr.heading_from_cot)
     deriveMotion(tr);
 
   m_cot_accepted++;
@@ -596,9 +612,13 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
 // deriveMotion()
 //
 // Estimates speed and course from the last two fixes, for
-// clients that omit <track>. Without this an ATAK user shows a
-// permanent heading of 0 and never triggers a speed-dependent
-// behavior.
+// clients that omit <track> and for heading_source=gps. Without
+// this an ATAK user shows a permanent heading of 0 and never
+// triggers a speed-dependent behavior.
+//
+// Only the fields not already taken from the CoT are touched:
+// with heading_source=gps and <track> present, speed keeps the
+// client's value and only course is derived here.
 //
 // Skipped when the two fixes are too close in time (noise gets
 // amplified into an absurd speed) or the movement is inside GPS
@@ -608,6 +628,10 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
 
 void CoTTrack::deriveMotion(TakTrack& tr)
 {
+  bool want_speed  = !tr.motion_from_cot;
+  bool want_course = !tr.heading_from_cot;
+  if(!want_speed && !want_course) return;
+
   if(!tr.prev_valid || !tr.xy_valid) return;
 
   double dt = tr.last_rx - tr.prev_rx;
@@ -618,16 +642,19 @@ void CoTTrack::deriveMotion(TakTrack& tr)
   double dist = hypot(dx, dy);
 
   if(dist < 1.0) {              // inside handheld GPS noise
-    tr.speed = 0.0;
+    if(want_speed) tr.speed = 0.0;
     return;                     // keep the previous course
   }
 
-  tr.speed = dist / dt;
+  if(want_speed)
+    tr.speed = dist / dt;
 
-  // MOOS heading: degrees clockwise from north (+Y), so atan2(dx, dy).
-  double hdg = atan2(dx, dy) * 180.0 / M_PI;
-  if(hdg < 0.0) hdg += 360.0;
-  tr.course = hdg;
+  if(want_course) {
+    // MOOS heading: degrees clockwise from north (+Y), so atan2(dx, dy).
+    double hdg = atan2(dx, dy) * 180.0 / M_PI;
+    if(hdg < 0.0) hdg += 360.0;
+    tr.course = hdg;
+  }
 }
 
 
@@ -1019,7 +1046,7 @@ bool CoTTrack::buildReport()
   m_msgs << "Motion source: "
          << (m_derive_motion_only ? "derived from fixes only"
                                   : "CoT <track> when present, else derived")
-         << endl;
+         << "   heading_source=" << m_heading_source << endl;
 
   if(m_allow_calls.empty()) {
     m_msgs << "Callsign whitelist: (off — all callsigns admitted)" << endl;
@@ -1068,8 +1095,9 @@ bool CoTTrack::buildReport()
            << " lon="      << doubleToStringX(tr.lon, 6)
            << (tr.xy_valid ? "" : "  [NO XY]") << endl;
     m_msgs << "      spd=" << doubleToStringX(tr.speed, 2)
-           << " hdg="      << doubleToStringX(tr.course, 1)
            << (tr.motion_from_cot ? " (cot)" : " (derived)")
+           << " hdg="      << doubleToStringX(tr.course, 1)
+           << (tr.heading_from_cot ? " (cot)" : " (derived)")
            << "  age="     << doubleToStringX(age, 1) << "s"
            << "  updates=" << tr.updates << endl;
   }
