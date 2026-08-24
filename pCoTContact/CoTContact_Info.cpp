@@ -70,6 +70,11 @@ void showExampleConfigAndExit()
   blk("  // Hostile contacts never get __group regardless.            ");
   blu("  team_color = Cyan                                             ");
   blk("                                                                ");
+  blk("  // Callsign overrides — TAK displays these instead of the    ");
+  blk("  // vehicle name. One line per vehicle; case preserved.       ");
+  blu("  // callsign = blue_one:BOAT-1                                 ");
+  blu("  // callsign = blue_two:BOAT-2                                 ");
+  blk("                                                                ");
   blu("  moving_send_interval     = 1.0   // seconds                  ");
   blu("  stationary_send_interval = 3.0   // seconds                  ");
   blu("  speed_threshold          = 0.5   // m/s                      ");
@@ -106,6 +111,7 @@ void showExampleConfigAndExit()
   blk("//   AppTick   = 4                                              ");
   blk("//   CommsTick = 4                                              ");
   blk("//   own_vehicle = blue_one   // auto-learned if omitted        ");
+  blk("//   callsign    = BOAT-1     // TAK callsign override          ");
   blk("//                                                              ");
   blk("//   // f=friendly h=hostile; team_color sets ATAK icon color  ");
   blk("//   // affil=f+team_color=Cyan → cyan icon, IN contacts list  ");
@@ -149,6 +155,11 @@ void showInterfaceAndExit()
   blk("                                                                ");
   blk("KEY CONFIG PARAMS:                                              ");
   blk("------------------------------------                            ");
+  blk("  callsign = <cs> | <vname>:<cs>   TAK callsign override.     ");
+  blk("    Bare form: single-vehicle mode, applies to own vehicle.   ");
+  blk("    <vname>:<cs> form: per-vehicle, repeatable, either mode.  ");
+  blk("    Overrides the displayed callsign only — the CoT uid stays ");
+  blk("    surveyor-<vname>, so no duplicate contact appears in TAK. ");
   blk("  affiliation = f|h|n|u   CoT type affiliation (default: f)   ");
   blk("  team_color  = Cyan|Red|...  ATAK icon color via <__group>   ");
   blk("    Omit team_color for map-only (no contacts list entry).     ");

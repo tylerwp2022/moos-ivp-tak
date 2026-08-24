@@ -143,6 +143,29 @@ bool CoTContact::OnStartUp()
       m_multi_mode = true;
       debugLog("Config: hostile_vehicles = { " + log_str + "}");
     }
+    else if(param == "callsign") {
+      // Callsign override — preserve case, TAK displays it as-is.
+      //   callsign = BOAT-1            (single-vehicle: own vehicle)
+      //   callsign = blue_one:BOAT-1   (either mode: per-vehicle)
+      string v = orig; biteStringX(v, '=');
+      v = stripBlankEnds(v);
+      if(v.find(':') != string::npos) {
+        string vname = stripBlankEnds(biteStringX(v, ':'));
+        string cs    = stripBlankEnds(v);
+        if(vname.empty() || cs.empty())
+          reportConfigWarning("pCoTContact: bad callsign entry: " + orig);
+        else {
+          m_callsign_map[vname] = cs;
+          debugLog("Config: callsign " + vname + " -> " + cs);
+        }
+      }
+      else if(!v.empty()) {
+        m_callsign_default = v;
+        debugLog("Config: callsign = " + m_callsign_default);
+      }
+      else
+        reportConfigWarning("pCoTContact: empty callsign");
+    }
     else if(param == "moving_send_interval") {
       m_moving_send_interval = atof(value.c_str());
       debugLog("Config: moving_send_interval = " +
@@ -246,6 +269,10 @@ bool CoTContact::OnStartUp()
       m_own_set.insert(m_own_vehicle);
     if(m_own_set.empty() && m_hostile_set.empty())
       reportConfigWarning("pCoTContact: multi-vehicle mode but no vehicles listed");
+    if(!m_callsign_default.empty())
+      reportConfigWarning("pCoTContact: bare callsign=" + m_callsign_default +
+                          " ignored in multi-vehicle mode — "
+                          "use callsign = <vname>:<callsign>");
     debugLog("OnStartUp: MULTI-VEHICLE mode — own=" +
              intToString((int)m_own_set.size()) +
              " hostile=" + intToString((int)m_hostile_set.size()));
@@ -391,6 +418,24 @@ bool CoTContact::isFriendly(const std::string& name) const
     return (m_own_set.count(name) > 0);
   else
     return m_own_friendly; // single-vehicle mode: own_role config
+}
+
+
+// ============================================================
+// callsignOf()
+//
+// Per-vehicle map entry wins, then the bare single-vehicle
+// override, then the vehicle name unchanged.
+// ============================================================
+
+string CoTContact::callsignOf(const std::string& name) const
+{
+  auto it = m_callsign_map.find(name);
+  if(it != m_callsign_map.end())
+    return it->second;
+  if(!m_multi_mode && !m_callsign_default.empty() && (name == m_own_vehicle))
+    return m_callsign_default;
+  return name;
 }
 
 
@@ -623,10 +668,10 @@ string CoTContact::buildAlertCoT(const VehicleState& vs)
       " hae=\"0.0\""
       " ce=\"9999999.0\" le=\"9999999.0\"/>"
     "<detail>"
-      "<contact callsign=\"" + vs.name + "-Alert\"/>"
+      "<contact callsign=\"" + callsignOf(vs.name) + "-Alert\"/>"
       "<link uid=\"surveyor-" + vs.name + "\""
            " type=\"a-f-S-C-U-N\" relation=\"p-p\"/>"
-      "<emergency type=\"In Contact\">" + vs.name + "</emergency>"
+      "<emergency type=\"In Contact\">" + callsignOf(vs.name) + "</emergency>"
     "</detail>"
     "</event>";
 }
@@ -662,7 +707,7 @@ string CoTContact::buildAlertCancelCoT(const VehicleState& vs)
       " hae=\"0.0\""
       " ce=\"9999999.0\" le=\"9999999.0\"/>"
     "<detail>"
-      "<emergency cancel=\"true\">" + vs.name + "</emergency>"
+      "<emergency cancel=\"true\">" + callsignOf(vs.name) + "</emergency>"
     "</detail>"
     "</event>";
 }
@@ -788,11 +833,13 @@ string CoTContact::buildPositionCoT(const VehicleState& vs)
   // them as messageable in ATAK's contacts list.
   string endpoint_attr = group_elem.empty() ? "" : " endpoint=\"*:-1:stcp\"";
 
+  string callsign = callsignOf(vs.name);
+
   string detail =
     "<detail>"
-      "<contact callsign=\"" + vs.name + "\"" + endpoint_attr + "/>"
+      "<contact callsign=\"" + callsign + "\"" + endpoint_attr + "/>"
     + group_elem +
-      "<uid Droid=\""        + vs.name + "\"/>"
+      "<uid Droid=\""        + callsign + "\"/>"
       "<takv"
         " device=\"SeaRobotics-Surveyor\""
         " platform=\"pCoTContact\""
@@ -892,7 +939,9 @@ bool CoTContact::buildReport()
     double age   = m_curr_time - vs.timestamp;
     bool   stale = (age > 5.0);
     bool   moving = (vs.speed > m_speed_threshold);
+    string callsign = callsignOf(vs.name);
     m_msgs << "  " << vs.name
+           << (callsign != vs.name ? " (as " + callsign + ")" : "")
            << (vs.friendly ? " [own]" : " [opp]")
            << (isHidden(vs.name)       ? " [HIDDEN]" : "")
            << (isTagSuppressed(vs.name) ? " [TAGGED]" : "")

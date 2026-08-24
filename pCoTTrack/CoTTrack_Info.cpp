@@ -85,6 +85,12 @@ void showExampleConfigAndExit()
   blk("  // group_from_team=false). Unset = no GROUP field.          ");
   blk("  // node_group = blue                                        ");
   blk("                                                                ");
+  blk("  // ---- vehicle-name mapping ----                            ");
+  blk("  // Mapped operators post under the exact vehicle name (no    ");
+  blk("  // node_prefix), so a real ATAK user can play a standard     ");
+  blk("  // mission vehicle. Callsign match is case-insensitive.      ");
+  blk("  // vname_map = delta 1 : blue_four                           ");
+  blk("                                                                ");
   blk("  // ---- what to ingest ----                                  ");
   blk("  // Prefix match. a-f-G-U also claims a-f-G-U-C-I etc.       ");
   blu("  track_cot_types = a-f-G-U,a-h-G-U,a-n-G-U,a-u-G-U            ");

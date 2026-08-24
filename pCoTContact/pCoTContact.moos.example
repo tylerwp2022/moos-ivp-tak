@@ -92,6 +92,23 @@ ProcessConfig = pCoTContact
   hostile_vehicles = red_one,red_two,red_three
 
   //----------------------------------------------------------
+  // callsign — override the callsign shown in TAK.
+  //
+  //   callsign = BOAT-1            single-vehicle mode: applies
+  //                                to the own vehicle
+  //   callsign = blue_one:BOAT-1   either mode: per-vehicle,
+  //                                one line per vehicle
+  //
+  // Case is preserved; TAK displays the callsign as-is. Only
+  // the displayed callsign (<contact callsign> / <uid Droid>)
+  // changes — the CoT uid stays surveyor-<vname>, so changing
+  // a callsign does not create a duplicate contact in TAK.
+  // Vehicles without an override use their vehicle name.
+  //----------------------------------------------------------
+  // callsign = blue_one:BOAT-1
+  // callsign = blue_two:BOAT-2
+
+  //----------------------------------------------------------
   // team_color — ATAK icon color for friendly contacts.
   // hostile_team_color — same, for hostile contacts.
   // Controls the <__group name="..."/> element in the CoT.
@@ -190,6 +207,11 @@ ProcessConfig = pCoTContact
 //   // Set to the RNAME of this robot (e.g. blue_one).
 //   // In wp_2025 missions this is passed via nsplug: $(RNAME)
 //   own_vehicle = blue_one
+//
+//   // callsign — override the callsign shown in TAK for this
+//   // vehicle (default: the vehicle name). Display-only; the
+//   // CoT uid stays surveyor-<vname>.
+//   // callsign = BOAT-1
 //
 //   // own_role — this vehicle's HVT game role (default: friendly).
 //   // hostile = hidden-group member: with stealth_integration the

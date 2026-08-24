@@ -128,6 +128,10 @@ protected:
   bool shouldTrack(const std::string& name) const;
   bool isFriendly(const std::string& name) const;
 
+  // Callsign override lookup — custom callsign if configured,
+  // otherwise the vehicle name
+  std::string callsignOf(const std::string& name) const;
+
   // Stealth integration (HVT_REVEAL_STATE from uFldNodeCommsHVT)
   void handleRevealState(const std::string& spec);
   bool isHidden(const std::string& name) const;
@@ -153,6 +157,20 @@ private:
 
   // All tracked vehicles — keyed by name
   std::map<std::string, VehicleState> m_vehicles;
+
+  // --------------------------------------------------------
+  // Callsign overrides
+  //
+  //   callsign = BOAT-1            single-vehicle: own vehicle
+  //   callsign = blue_one:BOAT-1   either mode: per-vehicle
+  //
+  // Overrides the callsign shown in TAK (<contact callsign>
+  // and <uid Droid>). The CoT event uid stays derived from the
+  // vehicle name, so the TAK-side identity is unchanged and a
+  // callsign edit doesn't spawn a duplicate contact.
+  // --------------------------------------------------------
+  std::string m_callsign_default;                    // bare form (single mode)
+  std::map<std::string, std::string> m_callsign_map; // vname -> callsign
 
   // --------------------------------------------------------
   // Send throttle
