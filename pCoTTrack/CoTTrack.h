@@ -227,6 +227,13 @@ private:
   // mission-side has to be renamed. Keys stored lowercase; matched
   // against the lowercased callsign.
   std::map<std::string, std::string> m_vname_map;
+
+  // vname_map_only: when true, ONLY tracks whose callsign has a
+  // vname_map entry are ingested — every other ATAK client is
+  // dropped. With vname_map = <callsign>:blue_four this shows
+  // just the operator playing blue_four in pMarineViewer.
+  // Default false: all surviving tracks are published.
+  bool m_vname_map_only;
   std::string m_node_color;      // NODE_REPORT COLOR=
   double      m_node_length;     // NODE_REPORT LENGTH= (meters)
   bool        m_lowercase_names; // fold node names to lower case
@@ -289,6 +296,7 @@ private:
   unsigned int m_cot_accepted;    // matched the type filter, had a position
   unsigned int m_cot_loopback;    // dropped by the uid/callsign filters
   unsigned int m_cot_not_listed;  // dropped by the callsign whitelist
+  unsigned int m_cot_unmapped;    // dropped by vname_map_only
   unsigned int m_reports_posted;  // NODE_REPORTs published
   unsigned int m_tracks_dropped;  // tracks expired on stale_timeout
   unsigned int m_geo_failures;    // lat/lon → XY conversions that failed

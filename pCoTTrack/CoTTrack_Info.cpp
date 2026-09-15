@@ -90,6 +90,10 @@ void showExampleConfigAndExit()
   blk("  // node_prefix), so a real ATAK user can play a standard     ");
   blk("  // mission vehicle. Callsign match is case-insensitive.      ");
   blk("  // vname_map = delta 1 : blue_four                           ");
+  blk("  // vname_map_only=true: ONLY mapped callsigns are tracked —  ");
+  blk("  // every other ATAK client is dropped, so just the operator  ");
+  blk("  // playing e.g. blue_four appears in pMarineViewer.          ");
+  blu("  vname_map_only = false                                        ");
   blk("                                                                ");
   blk("  // ---- what to ingest ----                                  ");
   blk("  // Prefix match. a-f-G-U also claims a-f-G-U-C-I etc.       ");

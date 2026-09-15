@@ -59,6 +59,12 @@ Ingest can be narrowed further with `ignore_callsign` (exact-match
 blocklist) and `callsign_whitelist` (when set, *only* the listed callsigns
 are tracked, case-insensitively).
 
+`vname_map_only = true` narrows it the other way around: only callsigns
+with a `vname_map` entry (see below) are tracked and every other ATAK
+client is dropped. With `vname_map = bark:blue_four` this puts just the
+operator playing blue_four in pMarineViewer, no matter how many other TAK
+clients are on the server.
+
 ## Node naming
 
 Tracks are keyed on the CoT `uid`, which is stable for the life of an ATAK
@@ -161,6 +167,7 @@ as the rest of the mission — to place inbound lat/lon on the local grid.
 | `group_from_team`     | `true`                              | derive `GROUP` from the ATAK team color |
 | `team_map`            | reds→red, blues→blue                | `color:team` pairs, comma separated |
 | `vname_map`           | (unset)                             | `callsign:vname` — post as an exact vehicle name |
+| `vname_map_only`      | `false`                             | track *only* vname_map'd callsigns; drop all others |
 | `track_cot_types`     | `a-f-G-U,a-h-G-U,a-n-G-U,a-u-G-U`   | CoT type prefixes to accept (case sensitive) |
 | `ignore_uid_prefix`   | `surveyor-`                         | loopback suppression |
 | `ignore_callsign`     | (unset)                             | exact callsigns to drop |
@@ -193,6 +200,7 @@ ProcessConfig = pCoTTrack
   // team_map     = red:red, maroon:red, cyan:blue, dark blue:blue
   // node_group   = blue
   // vname_map    = bark:blue_four
+  // vname_map_only = true   // drop every ATAK client not in vname_map
 
   track_cot_types   = a-f-G-U,a-h-G-U,a-n-G-U,a-u-G-U
   ignore_uid_prefix = surveyor-

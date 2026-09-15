@@ -1228,23 +1228,28 @@ string CoTGraphics::buildViewCircleCoT(const ViewCircle& vc)
 bool CoTGraphics::isLabelBlocked(const std::string& label,
                                   const std::string& shape_type) const
 {
+  // Config values arrive lowercased (OnStartUp lowercases the
+  // whole line), but labels are mixed-case (e.g.
+  // "blue_three_RC_control"), so match case-insensitively.
+  string llabel = tolower(label);
+
   // VIEW_CIRCLE: skip vehicle_names filter entirely
   if(shape_type != "VIEW_CIRCLE" && m_shoreside_mode) {
     for(const auto& vname : m_vehicle_names) {
-      if(label.find(vname) != string::npos)
+      if(llabel.find(tolower(vname)) != string::npos)
         return true;
     }
   }
 
   // Legacy: explicit substring patterns (applies to all types)
   for(const auto& pattern : m_label_block_contains) {
-    if(label.find(pattern) != string::npos)
+    if(llabel.find(tolower(pattern)) != string::npos)
       return true;
   }
 
   // Whole-label matches (applies to all types)
   for(const auto& blocked : m_label_block_exact) {
-    if(label == blocked)
+    if(llabel == tolower(blocked))
       return true;
   }
 

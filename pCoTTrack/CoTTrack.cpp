@@ -38,6 +38,7 @@ CoTTrack::CoTTrack()
   m_team_map["dark blue"]  = "blue";
   m_team_map["cyan"]       = "blue";
   m_team_map["teal"]       = "blue";
+  m_vname_map_only  = false;
   m_node_color      = "yellow";
   m_node_length     = 2.0;
   m_lowercase_names = true;
@@ -72,6 +73,7 @@ CoTTrack::CoTTrack()
   m_cot_accepted   = 0;
   m_cot_loopback   = 0;
   m_cot_not_listed = 0;
+  m_cot_unmapped   = 0;
   m_reports_posted = 0;
   m_tracks_dropped = 0;
   m_geo_failures   = 0;
@@ -181,6 +183,10 @@ bool CoTTrack::OnStartUp()
         log_str += cs + ">" + vname + " ";
       }
       debugLog("Config: vname_map = { " + log_str + "}");
+    }
+    else if(param == "vname_map_only") {
+      setBooleanOnString(m_vname_map_only, value);
+      debugLog("Config: vname_map_only = " + boolToString(m_vname_map_only));
     }
     else if(param == "node_color") {
       m_node_color = value;
@@ -329,6 +335,10 @@ bool CoTTrack::OnStartUp()
   if(!m_publish_node_report && !m_publish_view_marker)
     reportConfigWarning("pCoTTrack: both publish_node_report and "
                         "publish_view_marker are false — app will do nothing");
+
+  if(m_vname_map_only && m_vname_map.empty())
+    reportConfigWarning("pCoTTrack: vname_map_only=true but vname_map is "
+                        "empty — every inbound track will be dropped");
 
   registerVariables();
   return true;
@@ -493,6 +503,17 @@ bool CoTTrack::handleInboundCoT(const std::string& xml)
     m_cot_not_listed++;
     debugLog("handleInboundCoT: callsign not on whitelist — dropped: " +
              callsign);
+    return false;
+  }
+
+  // vname_map_only: admit only operators standing in for a mission
+  // vehicle (vname_map entry) — everyone else's phone stays off the map.
+  if(m_vname_map_only &&
+     (m_vname_map.find(tolower(stripBlankEnds(callsign))) ==
+      m_vname_map.end())) {
+    m_cot_unmapped++;
+    debugLog("handleInboundCoT: vname_map_only — unmapped callsign "
+             "dropped: " + callsign);
     return false;
   }
 
@@ -1056,12 +1077,21 @@ bool CoTTrack::buildReport()
     for(const auto& c : m_allow_calls) calls += c + " ";
     m_msgs << "Callsign whitelist: " << calls << endl;
   }
+
+  if(m_vname_map_only) {
+    string maps;
+    for(const auto& kv : m_vname_map)
+      maps += kv.first + ">" + kv.second + " ";
+    m_msgs << "vname_map_only: ON — only mapped callsigns tracked: "
+           << (maps.empty() ? "(none mapped!)" : maps) << endl;
+  }
   m_msgs << endl;
 
   m_msgs << "CoT inbound seen: " << m_cot_received
          << "   accepted: "      << m_cot_accepted
          << "   loopback dropped: " << m_cot_loopback
-         << "   not whitelisted: " << m_cot_not_listed << endl;
+         << "   not whitelisted: " << m_cot_not_listed
+         << "   unmapped: " << m_cot_unmapped << endl;
   m_msgs << "Reports posted: "  << m_reports_posted
          << "   tracks dropped (stale): " << m_tracks_dropped
          << "   geodesy failures: " << m_geo_failures << endl;
